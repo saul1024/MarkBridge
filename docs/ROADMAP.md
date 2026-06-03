@@ -10,6 +10,8 @@ MVP 先把迁移链路做清楚，不做书签类型分级。
 - Chrome / Edge Profile -> MarkBridge
 - MarkBridge -> HTML
 - MarkBridge -> Chrome / Edge Profile
+- Chrome / Edge Profile -> HTML
+- HTML -> Chrome / Edge Profile
 - 指定文件夹导出
 - 浏览器写入前备份和恢复
 
@@ -28,12 +30,13 @@ MVP 先把迁移链路做清楚，不做书签类型分级。
 - Chrome / Edge Profile 列表。
 - Chrome / Edge Profile 拉取：`pull-browser`。
 - Chrome / Edge Profile 投递：`push-browser`。
+- 一键浏览器导出：`export-browser`。
+- 一键浏览器导入：`import-browser`。
 - 写入前备份：`.markbridge-backup-*`。
 - 备份恢复：`browser restore`。
 
 待补强：
 
-- 更友好的错误提示和命令帮助。
 - 更完整的人工验收脚本。
 - 书签文件夹选择的交互体验。
 - 更清晰的本地库迁移策略。

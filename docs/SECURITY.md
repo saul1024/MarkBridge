@@ -19,6 +19,7 @@ MarkBridge 当前不是加密保险箱：
 - 只导出指定文件夹。
 - 用独立 Profile 接收 MarkBridge 投递结果。
 - 写入浏览器前自动备份，便于恢复。
+- 使用 `export-browser` / `import-browser` 缩短操作链路，减少误选本地库的风险。
 
 ## 3. 风险
 
@@ -29,8 +30,8 @@ MarkBridge 当前不是加密保险箱：
 ## 4. 当前建议
 
 - 敏感书签不长期保存在公司电脑浏览器 Profile 中。
-- 使用 `pull-browser` 拉取后，按目录导出需要迁移的部分。
-- 使用 `push-browser` 前确认目标 Profile。
+- 使用 `export-browser --folder` 只导出需要迁移的目录。
+- 使用 `import-browser` 前确认目标 Profile。
 - 写入浏览器时使用 `--quit-browser --reopen`。
 
 ## 5. 后续增强

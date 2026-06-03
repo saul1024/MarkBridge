@@ -31,7 +31,34 @@ Folders: 4
 
 `list` 能看到 5 条 demo 书签。
 
-## 3. 重复导入不叠加
+## 3. 一键浏览器导出
+
+```sh
+markbridge browser profiles --browser chrome
+markbridge export-browser --browser chrome --profile "Default" --folder "Books" --output ~/Desktop/books.html --dry-run
+markbridge export-browser --browser chrome --profile "Default" --folder "Books" --output ~/Desktop/books.html
+```
+
+预期：
+
+- `--dry-run` 不写 HTML。
+- 正式执行写出 `~/Desktop/books.html`。
+- 输出里显示来源 Profile、来源 `Bookmarks` 文件路径和命中文件夹。
+
+## 4. 一键浏览器导入
+
+```sh
+markbridge import-browser --input ~/Desktop/books.html --browser chrome --profile "Default" --folder MarkBridge --dry-run
+markbridge import-browser --input ~/Desktop/books.html --browser chrome --profile "Default" --folder MarkBridge --quit-browser --reopen
+```
+
+预期：
+
+- `--dry-run` 不写浏览器。
+- 正式执行创建备份。
+- Chrome 打开后，在 `chrome://bookmarks` 可以看到 `Bookmarks Bar / MarkBridge`。
+
+## 5. 重复导入不叠加
 
 ```sh
 markbridge import fixtures/demo-bookmarks.html --mode merge
@@ -44,7 +71,7 @@ markbridge status
 Bookmarks: 5
 ```
 
-## 4. append 明确叠加
+## 6. append 明确叠加
 
 ```sh
 export MARKBRIDGE_HOME="$(mktemp -d -t markbridge-append)"
@@ -59,7 +86,7 @@ markbridge status
 Bookmarks: 10
 ```
 
-## 5. 整库导出
+## 7. 整库导出
 
 ```sh
 export MARKBRIDGE_HOME="$(mktemp -d -t markbridge-export)"
@@ -75,7 +102,7 @@ grep -E "MarkBridge Public Docs|Engineering Search|Private Bank Portal|Private H
 
 预期有输出。
 
-## 6. 指定文件夹导出
+## 8. 指定文件夹导出
 
 ```sh
 markbridge export "$MARKBRIDGE_HOME/personal-vault.html" --folder "Personal Vault"
@@ -93,7 +120,7 @@ grep -E "MarkBridge Public Docs|Engineering Search|Temporary Article" "$MARKBRID
 - 第一条 `grep` 有输出。
 - 第二条 `grep` 没有输出。
 
-## 7. Chrome Profile 拉取
+## 9. Chrome Profile 拉取
 
 ```sh
 markbridge browser profiles --browser chrome
@@ -111,7 +138,7 @@ markbridge list
 - `--dry-run` 不写库。
 - 正式拉取后 `status` 和 `list` 能看到浏览器书签。
 
-## 8. Chrome Profile 投递
+## 10. Chrome Profile 投递
 
 ```sh
 markbridge push-browser --browser chrome --profile "Default" --folder MarkBridge --quit-browser --reopen
@@ -124,7 +151,7 @@ markbridge push-browser --browser chrome --profile "Default" --folder MarkBridge
 - 命令输出备份路径。
 - Chrome 打开后，在 `chrome://bookmarks` 可以看到 `Bookmarks Bar / MarkBridge`。
 
-## 9. 备份恢复
+## 11. 备份恢复
 
 ```sh
 markbridge browser backups --browser chrome --profile "Default"

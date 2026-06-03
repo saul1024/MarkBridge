@@ -49,6 +49,16 @@ async function main(argv) {
     return;
   }
 
+  if (command === "export-browser") {
+    await commandExportBrowser(positionals.slice(1), flags);
+    return;
+  }
+
+  if (command === "import-browser") {
+    await commandImportBrowser(positionals.slice(1), flags);
+    return;
+  }
+
   if (command === "edit") {
     await commandEdit(positionals.slice(1), flags, libraryPath);
     return;
@@ -188,6 +198,113 @@ async function commandExport(args, flags, libraryPath) {
   }, folderScope ? `Exported ${outputPath}\nFolder: ${folderScope.path}` : `Exported ${outputPath}`);
 }
 
+async function commandExportBrowser(args, flags) {
+  const outputPath = expandUserPath(valueFromFlagOrArg(flags.output, args[0]));
+
+  if (!flags.browser || !flags.profile || !outputPath) {
+    throw new Error("Usage: markbridge export-browser --browser chrome --profile <profile> --output <output.html> [--folder name|path] [--folder-path path] [--dry-run]");
+  }
+
+  if (flags.output === true || flags.folder === true || flags.folderPath === true) {
+    throw new Error("Usage: markbridge export-browser --browser chrome --profile <profile> --output <output.html> [--folder name|path] [--folder-path path] [--dry-run]");
+  }
+
+  const pulled = await pullBrowserBookmarks({
+    browser: flags.browser,
+    profile: flags.profile,
+    browserRoot: expandUserPath(flags.browserRoot),
+    env: process.env
+  });
+  const exportOptions = {
+    includeEmptyFolders: Boolean(flags.includeEmptyFolders),
+    folder: flags.folder,
+    folderPath: flags.folderPath
+  };
+  const folderScope = resolveExportFolder(pulled.library, exportOptions);
+  const result = {
+    dryRun: Boolean(flags.dryRun),
+    outputPath,
+    browser: pulled.browser,
+    browserName: pulled.browserName,
+    profile: pulled.profile,
+    profileName: pulled.profileName,
+    bookmarksPath: pulled.bookmarksPath,
+    folder: folderScope,
+    pulled: pulled.importBatch.stats
+  };
+
+  if (!flags.dryRun) {
+    const html = exportBookmarksHtml(pulled.library, {
+      ...exportOptions,
+      folderId: folderScope?.id
+    });
+
+    await writeFile(outputPath, html, "utf8");
+  }
+
+  printJsonOrText(flags, result, formatExportBrowserResult(result));
+}
+
+async function commandImportBrowser(args, flags) {
+  const inputPath = expandUserPath(valueFromFlagOrArg(flags.input, args[0]));
+
+  if (!inputPath || !flags.browser || !flags.profile) {
+    throw new Error("Usage: markbridge import-browser --input <bookmarks.html> --browser chrome --profile <profile> [--folder MarkBridge] [--quit-browser] [--reopen] [--dry-run]");
+  }
+
+  if (flags.input === true || flags.folder === true) {
+    throw new Error("Usage: markbridge import-browser --input <bookmarks.html> --browser chrome --profile <profile> [--folder MarkBridge] [--quit-browser] [--reopen] [--dry-run]");
+  }
+
+  if (!existsSync(inputPath)) {
+    throw new Error(`Input bookmark file not found: ${inputPath}`);
+  }
+
+  const html = await readFile(inputPath, "utf8");
+  const imported = importBookmarksHtml(html, {
+    sourceFileName: basename(inputPath),
+    sourceBrowser: flags.browser
+  });
+  const targetFolder = flags.folder ?? "MarkBridge";
+
+  if (flags.dryRun) {
+    const profile = await resolveBrowserProfileForCli(flags);
+    const result = {
+      dryRun: true,
+      inputPath,
+      browser: profile.browser,
+      browserName: profile.browserName,
+      profile: profile.profile,
+      profileName: profile.name,
+      bookmarksPath: profile.bookmarksPath,
+      folder: targetFolder,
+      imported: imported.importBatch.stats
+    };
+
+    printJsonOrText(flags, result, formatImportBrowserDryRunResult(result));
+    return;
+  }
+
+  const pushed = await pushLibraryToBrowser(imported.library, {
+    browser: flags.browser,
+    profile: flags.profile,
+    browserRoot: expandUserPath(flags.browserRoot),
+    folder: targetFolder,
+    quitBrowser: Boolean(flags.quitBrowser),
+    reopen: Boolean(flags.reopen),
+    skipRunningCheck: Boolean(flags.skipRunningCheck),
+    env: process.env
+  });
+  const result = {
+    dryRun: false,
+    inputPath,
+    imported: imported.importBatch.stats,
+    ...pushed
+  };
+
+  printJsonOrText(flags, result, formatImportBrowserResult(result));
+}
+
 async function commandEdit(args, flags, libraryPath) {
   const id = args[0];
 
@@ -282,6 +399,26 @@ async function commandBrowserProfiles(flags) {
       profile.bookmarksPath
     ].join("\t"));
   }
+}
+
+async function resolveBrowserProfileForCli(flags) {
+  const profiles = await listBrowserProfiles({
+    browser: flags.browser,
+    browserRoot: expandUserPath(flags.browserRoot),
+    env: process.env
+  });
+  const requested = String(flags.profile);
+  const matches = profiles.filter((profile) => profile.profile === requested || profile.name === requested);
+
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`Browser profile is ambiguous: ${requested}. Use the profile directory name instead.`);
+  }
+
+  throw new Error(`Browser profile not found: ${requested}. Run markbridge browser profiles --browser ${flags.browser} first.`);
 }
 
 async function commandBrowserBackups(flags) {
@@ -489,6 +626,14 @@ function parseArgs(argv) {
   return { flags, positionals };
 }
 
+function valueFromFlagOrArg(flagValue, positionalValue) {
+  if (flagValue === true) {
+    return undefined;
+  }
+
+  return flagValue ?? positionalValue;
+}
+
 function printRows(flags, rows) {
   if (flags.json) {
     console.log(JSON.stringify(rows, null, 2));
@@ -547,10 +692,64 @@ function printImportResult(flags, result) {
   printJsonOrText(flags, object, output.join("\n"));
 }
 
+function formatExportBrowserResult(result) {
+  return [
+    result.dryRun
+      ? `Would export ${result.browserName} / ${result.profile} bookmarks to ${result.outputPath}.`
+      : `Exported ${result.browserName} / ${result.profile} bookmarks to ${result.outputPath}.`,
+    `Profile name: ${result.profileName}`,
+    `Bookmarks file: ${result.bookmarksPath}`,
+    `Folder: ${result.folder?.path ?? "all bookmarks"}`,
+    `Pulled: ${result.pulled.bookmarks} bookmark(s), ${result.pulled.folders} folder(s)`,
+    result.dryRun ? "No output file was written." : `Output: ${result.outputPath}`
+  ].join("\n");
+}
+
+function formatImportBrowserDryRunResult(result) {
+  return [
+    `Would import ${result.inputPath} to ${result.browserName} / ${result.profile}.`,
+    `Profile name: ${result.profileName}`,
+    `Target folder: Bookmarks Bar / ${result.folder}`,
+    `Bookmarks file: ${result.bookmarksPath}`,
+    `Imported: ${result.imported.bookmarks} bookmark(s), ${result.imported.folders} folder(s)`,
+    "No browser bookmarks were written."
+  ].join("\n");
+}
+
+function formatImportBrowserResult(result) {
+  const output = [
+    `Imported ${result.inputPath} to ${result.browserName} / ${result.profile}.`,
+    `Profile name: ${result.profileName}`,
+    `Imported: ${result.imported.bookmarks} bookmark(s), ${result.imported.folders} folder(s)`,
+    `Pushed: ${result.pushed} bookmark(s)`,
+    `Target folder: Bookmarks Bar / ${result.folder}`,
+    `Bookmarks file: ${result.bookmarksPath}`,
+    `Backup: ${result.backupPath}`
+  ];
+
+  if (result.quitBrowser) {
+    output.push(`Closed ${result.browserName}: yes`);
+  }
+
+  if (result.reopened) {
+    output.push(`Reopened ${result.browserName}: yes`);
+  }
+
+  output.push(
+    "Verify:",
+    result.reopened ? `  ${result.browserName} should open ${result.verifyUrl}` : `  Open ${result.verifyUrl}`,
+    `  Check folder: Bookmarks Bar / ${result.folder}`
+  );
+
+  return output.join("\n");
+}
+
 function printHelp() {
   console.log(`MarkBridge
 
 Usage:
+  markbridge export-browser --browser chrome|edge --profile <profile> --output <output.html> [--folder name|path] [--folder-path path] [--dry-run]
+  markbridge import-browser --input <bookmarks.html> --browser chrome|edge --profile <profile> [--folder MarkBridge] [--quit-browser] [--reopen] [--dry-run]
   markbridge import <bookmarks.html> [--mode merge|append|replace] [--dry-run] [--library path]
   markbridge list [--json]
   markbridge search <query> [--json]

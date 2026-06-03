@@ -114,6 +114,117 @@ test("CLI exports only a selected folder", async () => {
   }
 });
 
+test("CLI export-browser exports a selected browser profile folder without writing a library", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-export-browser-"));
+  const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
+  const { browserRoot, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFileWithAllRoots());
+
+  try {
+    const dryRunPath = join(markbridgeHome, "dry-run.html");
+    const dryRun = await runCli([
+      "export-browser",
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Nested Other",
+      "--output", dryRunPath,
+      "--dry-run",
+      "--json"
+    ], env);
+
+    assert.equal(dryRun.dryRun, true);
+    assert.equal(dryRun.browser, "chrome");
+    assert.equal(dryRun.profile, "Default");
+    assert.equal(dryRun.profileName, "Test Person");
+    assert.equal(dryRun.folder.path, "Other bookmarks / Nested Other");
+    assert.equal(dryRun.pulled.bookmarks, 3);
+    assert.equal(existsSync(dryRunPath), false);
+    assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
+
+    const exportPath = join(markbridgeHome, "nested-other.html");
+    const exportedResult = await runCli([
+      "export-browser",
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Nested Other",
+      "--output", exportPath,
+      "--json"
+    ], env);
+    const exported = await readFile(exportPath, "utf8");
+
+    assert.equal(exportedResult.dryRun, false);
+    assert.equal(exportedResult.outputPath, exportPath);
+    assert.equal(exportedResult.folder.path, "Other bookmarks / Nested Other");
+    assert.match(exported, /Nested Other/);
+    assert.match(exported, /Other Link/);
+    assert.doesNotMatch(exported, /Bar Link/);
+    assert.doesNotMatch(exported, /Synced Link/);
+    assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("CLI import-browser imports HTML directly into a browser profile", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-import-browser-"));
+  const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
+  const { browserRoot, bookmarksPath, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFile());
+
+  try {
+    const dryRun = await runCli([
+      "import-browser",
+      "--input", CHROME_FIXTURE_PATH,
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Imported",
+      "--dry-run",
+      "--json"
+    ], env);
+
+    assert.equal(dryRun.dryRun, true);
+    assert.equal(dryRun.imported.bookmarks, 3);
+    assert.equal(dryRun.imported.folders, 3);
+    assert.equal(dryRun.folder, "Imported");
+
+    const beforePush = await readFile(bookmarksPath, "utf8");
+    assert.doesNotMatch(beforePush, /Imported/);
+
+    const pushed = await runCli([
+      "import-browser",
+      "--input", CHROME_FIXTURE_PATH,
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Imported",
+      "--skip-running-check",
+      "--json"
+    ], env);
+
+    assert.equal(pushed.dryRun, false);
+    assert.equal(pushed.browser, "chrome");
+    assert.equal(pushed.profile, "Default");
+    assert.equal(pushed.profileName, "Test Person");
+    assert.equal(pushed.folder, "Imported");
+    assert.equal(pushed.imported.bookmarks, 3);
+    assert.equal(pushed.pushed, 3);
+    assert.equal(existsSync(pushed.backupPath), true);
+    assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
+
+    const browserBookmarks = JSON.parse(await readFile(bookmarksPath, "utf8"));
+    const importedFolder = browserBookmarks.roots.bookmark_bar.children.find((item) => item.name === "Imported");
+
+    assert.ok(importedFolder);
+    assert.deepEqual(importedFolder.children.map((item) => item.name), ["Bookmarks Bar"]);
+    assert.match(JSON.stringify(importedFolder), /Example Docs/);
+    assert.match(JSON.stringify(importedFolder), /中文资料/);
+    assert.match(JSON.stringify(importedFolder), /Tom & Jerry <Dev>/);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("CLI import merge mode deduplicates repeated imports", async () => {
   const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-merge-"));
   const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };

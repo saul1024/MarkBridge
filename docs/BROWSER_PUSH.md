@@ -24,7 +24,36 @@ browser  profile-directory  display-name  bookmarks=yes|no  bookmarks-path
 
 `--profile` 可以填 Profile 目录名，也可以填显示名，只要能唯一匹配。
 
-## 3. 从浏览器拉取
+## 3. 一键导出浏览器书签
+
+```sh
+markbridge export-browser --browser chrome --profile "Default" --output ~/Desktop/bookmarks.html
+markbridge export-browser --browser chrome --profile "Default" --folder "Books" --output ~/Desktop/books.html
+```
+
+方向：
+
+```text
+Chrome / Edge Profile -> HTML
+```
+
+这个命令不会写 MarkBridge 本地库。
+
+## 4. 一键导入浏览器书签
+
+```sh
+markbridge import-browser --input ~/Desktop/books.html --browser chrome --profile "Default" --folder MarkBridge --quit-browser --reopen
+```
+
+方向：
+
+```text
+HTML -> Chrome / Edge Profile
+```
+
+这个命令不会写 MarkBridge 本地库，但会写目标浏览器 Profile，因此会先创建备份。
+
+## 5. 从浏览器拉取到 MarkBridge
 
 ```sh
 markbridge pull-browser --browser chrome --profile "Default" [--mode merge|append|replace] [--dry-run]
@@ -38,7 +67,7 @@ Chrome / Edge Profile -> MarkBridge local library
 
 拉取会读取目标 Profile 的 `Bookmarks` 文件，不会写浏览器。
 
-## 4. 写入浏览器
+## 6. 从 MarkBridge 写入浏览器
 
 ```sh
 markbridge push-browser --browser chrome --profile "Default" [--folder MarkBridge] [--quit-browser] [--reopen]
@@ -58,7 +87,7 @@ Bookmarks Bar / MarkBridge
 
 可用 `--folder <name>` 修改目标文件夹名。
 
-## 5. 为什么要求浏览器关闭
+## 7. 为什么要求浏览器关闭
 
 Chrome / Edge 运行时可能会把内存中的书签状态重新写回 `Bookmarks` 文件。
 
@@ -70,7 +99,7 @@ Chrome / Edge 运行时可能会把内存中的书签状态重新写回 `Bookmar
 markbridge push-browser --browser chrome --profile "Default" --quit-browser --reopen
 ```
 
-## 6. 备份
+## 8. 备份
 
 写入前会自动创建备份：
 
@@ -92,7 +121,7 @@ markbridge browser restore --browser chrome --profile "Default" --backup <backup
 
 恢复前会再创建 safety backup。
 
-## 7. 验收用例
+## 9. 验收用例
 
 ```sh
 export MARKBRIDGE_HOME="$(mktemp -d -t markbridge-browser)"
