@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { importBookmarksHtml, pushLibraryToBrowser, restoreBrowserBackup } from "../src/index.js";
+import { importBookmarksHtml, previewLibraryToBrowser, pushLibraryToBrowser, restoreBrowserBackup } from "../src/index.js";
 
 const DEMO_FIXTURE_PATH = resolve("fixtures/demo-bookmarks.html");
 
@@ -69,6 +69,77 @@ test("pushLibraryToBrowser can quit a running browser, push bookmarks, and reope
     assert.match(serialized, /Private Bank Portal/);
     assert.match(serialized, /Private Health Notes/);
     assert.match(serialized, /Temporary Article/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("previewLibraryToBrowser reports merge duplicates without writing bookmarks", async () => {
+  const { home, browserRoot, bookmarksPath, cleanup } = await createTestProfile();
+  const library = await createDemoLibrary();
+
+  try {
+    await pushLibraryToBrowser(library, {
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      env: { MARKBRIDGE_HOME: home },
+      skipRunningCheck: true
+    });
+
+    const before = await readFile(bookmarksPath, "utf8");
+    const preview = await previewLibraryToBrowser(library, {
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      env: { MARKBRIDGE_HOME: home },
+      mode: "merge"
+    });
+    const after = await readFile(bookmarksPath, "utf8");
+
+    assert.equal(preview.mode, "merge");
+    assert.equal(preview.summary.targetFolderExisted, true);
+    assert.equal(preview.summary.addedBookmarks, 0);
+    assert.equal(preview.summary.skippedDuplicates, 5);
+    assert.equal(preview.summary.changed, false);
+    assert.equal(after, before);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("pushLibraryToBrowser merge mode does not duplicate repeated imports", async () => {
+  const { home, browserRoot, bookmarksPath, cleanup } = await createTestProfile();
+  const library = await createDemoLibrary();
+
+  try {
+    await pushLibraryToBrowser(library, {
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      env: { MARKBRIDGE_HOME: home },
+      skipRunningCheck: true,
+      mode: "merge"
+    });
+
+    const second = await pushLibraryToBrowser(library, {
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      env: { MARKBRIDGE_HOME: home },
+      skipRunningCheck: true,
+      mode: "merge"
+    });
+
+    assert.equal(second.pushed, 0);
+    assert.equal(second.backupPath, null);
+    assert.equal(second.summary.skippedDuplicates, 5);
+
+    const browserBookmarks = JSON.parse(await readFile(bookmarksPath, "utf8"));
+
+    assert.equal(countUrlOccurrences(browserBookmarks, "https://docs.example.com/markbridge"), 1);
+    assert.equal(countUrlOccurrences(browserBookmarks, "https://developer.mozilla.org/en-US/search?q=bookmarks"), 1);
+    assert.equal(countDirectFolders(browserBookmarks, "MarkBridge"), 1);
   } finally {
     await cleanup();
   }
@@ -207,4 +278,42 @@ function createChromeBookmarksFile() {
     },
     version: 1
   };
+}
+
+function countUrlOccurrences(value, url) {
+  let count = 0;
+
+  visitChromeNodes(value, (node) => {
+    if (node.type === "url" && node.url === url) {
+      count += 1;
+    }
+  });
+
+  return count;
+}
+
+function countDirectFolders(bookmarksFile, name) {
+  return bookmarksFile.roots.bookmark_bar.children
+    .filter((node) => node.type === "folder" && node.name === name)
+    .length;
+}
+
+function visitChromeNodes(value, visit) {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (value.type) {
+    visit(value);
+  }
+
+  for (const child of Object.values(value)) {
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        visitChromeNodes(item, visit);
+      }
+    } else if (child && typeof child === "object") {
+      visitChromeNodes(child, visit);
+    }
+  }
 }

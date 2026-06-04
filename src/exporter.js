@@ -62,7 +62,9 @@ export function resolveExportFolder(library, options = {}) {
 
   throw new Error([
     `Folder not found: ${selector}`,
-    "Use markbridge list to inspect bookmark paths, then retry with --folder-path."
+    "Available folders:",
+    ...formatFolderList(folders),
+    "Retry with --folder-path and one exact path."
   ].join("\n"));
 }
 
@@ -71,6 +73,13 @@ export function listExportFolders(library) {
 
   collectFolders(library, library.rootId, [], folders);
   return folders;
+}
+
+export function countExportedBookmarks(library, options = {}) {
+  const folderScope = resolveExportFolder(library, options);
+  const root = folderScope ? library.items[folderScope.id] : library.items[library.rootId];
+
+  return countBookmarksUnder(library, root);
 }
 
 export function shouldExportBookmark(bookmark, options = {}) {
@@ -155,6 +164,31 @@ function describeFolder(library, folder) {
     title: folder.title,
     path: path.join(" / ")
   };
+}
+
+function countBookmarksUnder(library, item) {
+  if (!item || item.deletedAt) {
+    return 0;
+  }
+
+  if (isBookmark(item)) {
+    return shouldExportBookmark(item) ? 1 : 0;
+  }
+
+  if (!isFolder(item)) {
+    return 0;
+  }
+
+  return getChildren(library, item.id)
+    .reduce((total, child) => total + countBookmarksUnder(library, child), 0);
+}
+
+function formatFolderList(folders) {
+  if (folders.length === 0) {
+    return ["  <none>"];
+  }
+
+  return folders.slice(0, 25).map((folder) => `  ${folder.path}`);
 }
 
 function normalizeFolderPath(value) {

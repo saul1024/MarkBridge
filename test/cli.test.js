@@ -137,6 +137,7 @@ test("CLI export-browser exports a selected browser profile folder without writi
     assert.equal(dryRun.profile, "Default");
     assert.equal(dryRun.profileName, "Test Person");
     assert.equal(dryRun.folder.path, "Other bookmarks / Nested Other");
+    assert.equal(dryRun.exportedBookmarks, 1);
     assert.equal(dryRun.pulled.bookmarks, 3);
     assert.equal(existsSync(dryRunPath), false);
     assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
@@ -156,6 +157,7 @@ test("CLI export-browser exports a selected browser profile folder without writi
     assert.equal(exportedResult.dryRun, false);
     assert.equal(exportedResult.outputPath, exportPath);
     assert.equal(exportedResult.folder.path, "Other bookmarks / Nested Other");
+    assert.equal(exportedResult.exportedBookmarks, 1);
     assert.match(exported, /Nested Other/);
     assert.match(exported, /Other Link/);
     assert.doesNotMatch(exported, /Bar Link/);
@@ -187,6 +189,10 @@ test("CLI import-browser imports HTML directly into a browser profile", async ()
     assert.equal(dryRun.imported.bookmarks, 3);
     assert.equal(dryRun.imported.folders, 3);
     assert.equal(dryRun.folder, "Imported");
+    assert.equal(dryRun.mode, "merge");
+    assert.equal(dryRun.summary.addedBookmarks, 3);
+    assert.equal(dryRun.summary.skippedDuplicates, 0);
+    assert.equal(dryRun.summary.targetFolderCreated, true);
 
     const beforePush = await readFile(bookmarksPath, "utf8");
     assert.doesNotMatch(beforePush, /Imported/);
@@ -207,8 +213,11 @@ test("CLI import-browser imports HTML directly into a browser profile", async ()
     assert.equal(pushed.profile, "Default");
     assert.equal(pushed.profileName, "Test Person");
     assert.equal(pushed.folder, "Imported");
+    assert.equal(pushed.mode, "merge");
     assert.equal(pushed.imported.bookmarks, 3);
     assert.equal(pushed.pushed, 3);
+    assert.equal(pushed.summary.addedBookmarks, 3);
+    assert.equal(pushed.summary.skippedDuplicates, 0);
     assert.equal(existsSync(pushed.backupPath), true);
     assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
 
@@ -220,6 +229,92 @@ test("CLI import-browser imports HTML directly into a browser profile", async ()
     assert.match(JSON.stringify(importedFolder), /Example Docs/);
     assert.match(JSON.stringify(importedFolder), /中文资料/);
     assert.match(JSON.stringify(importedFolder), /Tom & Jerry <Dev>/);
+
+    const secondDryRun = await runCli([
+      "import-browser",
+      "--input", CHROME_FIXTURE_PATH,
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Imported",
+      "--mode", "merge",
+      "--dry-run",
+      "--json"
+    ], env);
+
+    assert.equal(secondDryRun.summary.addedBookmarks, 0);
+    assert.equal(secondDryRun.summary.skippedDuplicates, 3);
+    assert.equal(secondDryRun.summary.changed, false);
+
+    const secondPush = await runCli([
+      "import-browser",
+      "--input", CHROME_FIXTURE_PATH,
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Imported",
+      "--mode", "merge",
+      "--skip-running-check",
+      "--json"
+    ], env);
+
+    assert.equal(secondPush.pushed, 0);
+    assert.equal(secondPush.summary.skippedDuplicates, 3);
+    assert.equal(secondPush.summary.changed, false);
+    assert.equal(secondPush.backupPath, null);
+
+    const afterSecondPush = JSON.parse(await readFile(bookmarksPath, "utf8"));
+    assert.equal(countUrlOccurrences(afterSecondPush, "https://Example.com/docs/#intro"), 1);
+    assert.equal(countUrlOccurrences(afterSecondPush, "https://example.com/zh?name=%E6%B5%8B%E8%AF%95&mode=1"), 1);
+    assert.equal(countUrlOccurrences(afterSecondPush, "https://example.com/escaped?name=Tom&role=dev"), 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("CLI import-browser replace-folder replaces only the selected target folder", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-import-browser-replace-"));
+  const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
+  const { browserRoot, bookmarksPath, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFile());
+
+  try {
+    await runCli([
+      "import-browser",
+      "--input", CHROME_FIXTURE_PATH,
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Imported",
+      "--skip-running-check",
+      "--json"
+    ], env);
+
+    const replaced = await runCli([
+      "import-browser",
+      "--input", FIXTURE_PATH,
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Imported",
+      "--mode", "replace-folder",
+      "--skip-running-check",
+      "--json"
+    ], env);
+
+    assert.equal(replaced.mode, "replace-folder");
+    assert.equal(replaced.summary.replacedFolder, true);
+    assert.equal(replaced.pushed, 3);
+    assert.equal(existsSync(replaced.backupPath), true);
+
+    const browserBookmarks = JSON.parse(await readFile(bookmarksPath, "utf8"));
+    const serialized = JSON.stringify(browserBookmarks);
+
+    assert.match(serialized, /Existing Bookmark/);
+    assert.match(serialized, /Public Link/);
+    assert.match(serialized, /Private Secret/);
+    assert.doesNotMatch(serialized, /Example Docs/);
+    assert.doesNotMatch(serialized, /Tom & Jerry <Dev>/);
+    assert.equal(countDirectFolders(browserBookmarks, "Imported"), 1);
   } finally {
     await cleanup();
   }
@@ -704,4 +799,42 @@ function createChromeBookmarksFileWithAllRoots() {
   ];
 
   return file;
+}
+
+function countUrlOccurrences(value, url) {
+  let count = 0;
+
+  visitChromeNodes(value, (node) => {
+    if (node.type === "url" && node.url === url) {
+      count += 1;
+    }
+  });
+
+  return count;
+}
+
+function countDirectFolders(bookmarksFile, name) {
+  return bookmarksFile.roots.bookmark_bar.children
+    .filter((node) => node.type === "folder" && node.name === name)
+    .length;
+}
+
+function visitChromeNodes(value, visit) {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (value.type) {
+    visit(value);
+  }
+
+  for (const child of Object.values(value)) {
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        visitChromeNodes(item, visit);
+      }
+    } else if (child && typeof child === "object") {
+      visitChromeNodes(child, visit);
+    }
+  }
 }

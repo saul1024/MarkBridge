@@ -7,7 +7,8 @@
     "markbridge": "./bin/markbridge.js"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "acceptance": "node scripts/acceptance.js"
   },
   "engines": {
     "node": ">=22"

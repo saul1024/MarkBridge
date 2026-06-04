@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 
-import { exportBookmarksHtml, importBookmarksHtml, listBrowserBackups, listBrowserProfiles, pullBrowserBookmarks, pushLibraryToBrowser, resolveExportFolder, restoreBrowserBackup } from "../src/index.js";
+import { countExportedBookmarks, exportBookmarksHtml, importBookmarksHtml, listBrowserBackups, listBrowserProfiles, previewLibraryToBrowser, pullBrowserBookmarks, pushLibraryToBrowser, resolveExportFolder, restoreBrowserBackup } from "../src/index.js";
 import {
   applyImportedLibrary,
   libraryStats,
@@ -186,6 +186,10 @@ async function commandExport(args, flags, libraryPath) {
     folderPath: flags.folderPath
   };
   const folderScope = resolveExportFolder(library, exportOptions);
+  const exportedBookmarks = countExportedBookmarks(library, {
+    ...exportOptions,
+    folderId: folderScope?.id
+  });
   const html = exportBookmarksHtml(library, {
     ...exportOptions,
     folderId: folderScope?.id
@@ -194,8 +198,9 @@ async function commandExport(args, flags, libraryPath) {
   await writeFile(outputPath, html, "utf8");
   printJsonOrText(flags, {
     outputPath,
-    folder: folderScope
-  }, folderScope ? `Exported ${outputPath}\nFolder: ${folderScope.path}` : `Exported ${outputPath}`);
+    folder: folderScope,
+    exportedBookmarks
+  }, folderScope ? `Exported ${outputPath}\nFolder: ${folderScope.path}\nBookmarks exported: ${exportedBookmarks}` : `Exported ${outputPath}\nBookmarks exported: ${exportedBookmarks}`);
 }
 
 async function commandExportBrowser(args, flags) {
@@ -221,6 +226,10 @@ async function commandExportBrowser(args, flags) {
     folderPath: flags.folderPath
   };
   const folderScope = resolveExportFolder(pulled.library, exportOptions);
+  const exportedBookmarks = countExportedBookmarks(pulled.library, {
+    ...exportOptions,
+    folderId: folderScope?.id
+  });
   const result = {
     dryRun: Boolean(flags.dryRun),
     outputPath,
@@ -230,6 +239,7 @@ async function commandExportBrowser(args, flags) {
     profileName: pulled.profileName,
     bookmarksPath: pulled.bookmarksPath,
     folder: folderScope,
+    exportedBookmarks,
     pulled: pulled.importBatch.stats
   };
 
@@ -247,13 +257,14 @@ async function commandExportBrowser(args, flags) {
 
 async function commandImportBrowser(args, flags) {
   const inputPath = expandUserPath(valueFromFlagOrArg(flags.input, args[0]));
+  const usage = "Usage: markbridge import-browser --input <bookmarks.html> --browser chrome --profile <profile> [--folder MarkBridge] [--mode merge|replace-folder|append] [--quit-browser] [--reopen] [--dry-run]";
 
   if (!inputPath || !flags.browser || !flags.profile) {
-    throw new Error("Usage: markbridge import-browser --input <bookmarks.html> --browser chrome --profile <profile> [--folder MarkBridge] [--quit-browser] [--reopen] [--dry-run]");
+    throw new Error(usage);
   }
 
-  if (flags.input === true || flags.folder === true) {
-    throw new Error("Usage: markbridge import-browser --input <bookmarks.html> --browser chrome --profile <profile> [--folder MarkBridge] [--quit-browser] [--reopen] [--dry-run]");
+  if (flags.input === true || flags.folder === true || flags.mode === true) {
+    throw new Error(usage);
   }
 
   if (!existsSync(inputPath)) {
@@ -266,19 +277,23 @@ async function commandImportBrowser(args, flags) {
     sourceBrowser: flags.browser
   });
   const targetFolder = flags.folder ?? "MarkBridge";
+  const mode = flags.mode ?? "merge";
 
   if (flags.dryRun) {
-    const profile = await resolveBrowserProfileForCli(flags);
+    const preview = await previewLibraryToBrowser(imported.library, {
+      browser: flags.browser,
+      profile: flags.profile,
+      browserRoot: expandUserPath(flags.browserRoot),
+      folder: targetFolder,
+      mode,
+      env: process.env
+    });
     const result = {
       dryRun: true,
       inputPath,
-      browser: profile.browser,
-      browserName: profile.browserName,
-      profile: profile.profile,
-      profileName: profile.name,
-      bookmarksPath: profile.bookmarksPath,
+      imported: imported.importBatch.stats,
+      ...preview,
       folder: targetFolder,
-      imported: imported.importBatch.stats
     };
 
     printJsonOrText(flags, result, formatImportBrowserDryRunResult(result));
@@ -290,6 +305,7 @@ async function commandImportBrowser(args, flags) {
     profile: flags.profile,
     browserRoot: expandUserPath(flags.browserRoot),
     folder: targetFolder,
+    mode,
     quitBrowser: Boolean(flags.quitBrowser),
     reopen: Boolean(flags.reopen),
     skipRunningCheck: Boolean(flags.skipRunningCheck),
@@ -399,26 +415,6 @@ async function commandBrowserProfiles(flags) {
       profile.bookmarksPath
     ].join("\t"));
   }
-}
-
-async function resolveBrowserProfileForCli(flags) {
-  const profiles = await listBrowserProfiles({
-    browser: flags.browser,
-    browserRoot: expandUserPath(flags.browserRoot),
-    env: process.env
-  });
-  const requested = String(flags.profile);
-  const matches = profiles.filter((profile) => profile.profile === requested || profile.name === requested);
-
-  if (matches.length === 1) {
-    return matches[0];
-  }
-
-  if (matches.length > 1) {
-    throw new Error(`Browser profile is ambiguous: ${requested}. Use the profile directory name instead.`);
-  }
-
-  throw new Error(`Browser profile not found: ${requested}. Run markbridge browser profiles --browser ${flags.browser} first.`);
 }
 
 async function commandBrowserBackups(flags) {
@@ -532,7 +528,7 @@ async function commandPullBrowser(flags, libraryPath) {
 
 async function commandPushBrowser(flags, libraryPath) {
   if (!flags.browser || !flags.profile) {
-    throw new Error("Usage: markbridge push-browser --browser chrome --profile <profile>");
+    throw new Error("Usage: markbridge push-browser --browser chrome --profile <profile> [--folder MarkBridge] [--mode merge|replace-folder|append]");
   }
 
   const library = await requireLibrary(libraryPath);
@@ -541,6 +537,7 @@ async function commandPushBrowser(flags, libraryPath) {
     profile: flags.profile,
     browserRoot: expandUserPath(flags.browserRoot),
     folder: flags.folder,
+    mode: flags.mode,
     quitBrowser: Boolean(flags.quitBrowser),
     reopen: Boolean(flags.reopen),
     skipRunningCheck: Boolean(flags.skipRunningCheck),
@@ -549,9 +546,13 @@ async function commandPushBrowser(flags, libraryPath) {
 
   const output = [
     `Pushed ${result.pushed} bookmark(s) to ${result.browserName} / ${result.profile}.`,
+    `Mode: ${result.mode}`,
+    `Folders created: ${result.summary.addedFolders}`,
+    `Skipped duplicates: ${result.summary.skippedDuplicates}`,
+    `Target folder action: ${describeFolderAction(result.summary)}`,
     `Folder: Bookmarks Bar / ${result.folder}`,
     `Bookmarks file: ${result.bookmarksPath}`,
-    `Backup: ${result.backupPath}`
+    result.backupPath ? `Backup: ${result.backupPath}` : "Backup: not created because no browser changes were needed"
   ];
 
   if (result.quitBrowser) {
@@ -694,37 +695,50 @@ function printImportResult(flags, result) {
 
 function formatExportBrowserResult(result) {
   return [
-    result.dryRun
-      ? `Would export ${result.browserName} / ${result.profile} bookmarks to ${result.outputPath}.`
-      : `Exported ${result.browserName} / ${result.profile} bookmarks to ${result.outputPath}.`,
-    `Profile name: ${result.profileName}`,
-    `Bookmarks file: ${result.bookmarksPath}`,
-    `Folder: ${result.folder?.path ?? "all bookmarks"}`,
-    `Pulled: ${result.pulled.bookmarks} bookmark(s), ${result.pulled.folders} folder(s)`,
-    result.dryRun ? "No output file was written." : `Output: ${result.outputPath}`
+    result.dryRun ? "Would export browser bookmarks." : "Exported browser bookmarks.",
+    `Source: ${result.browserName} / ${result.profileName} (${result.profile})`,
+    `Source file: ${result.bookmarksPath}`,
+    `Source folder: ${result.folder?.path ?? "all bookmarks"}`,
+    `Bookmarks exported: ${result.exportedBookmarks}`,
+    `Output: ${result.outputPath}`,
+    result.dryRun ? "Output written: no" : "Output written: yes"
   ].join("\n");
 }
 
 function formatImportBrowserDryRunResult(result) {
   return [
-    `Would import ${result.inputPath} to ${result.browserName} / ${result.profile}.`,
-    `Profile name: ${result.profileName}`,
+    "Would import bookmarks into browser.",
+    `Input: ${result.inputPath}`,
+    `Target: ${result.browserName} / ${result.profileName} (${result.profile})`,
+    `Mode: ${result.mode}`,
     `Target folder: Bookmarks Bar / ${result.folder}`,
-    `Bookmarks file: ${result.bookmarksPath}`,
-    `Imported: ${result.imported.bookmarks} bookmark(s), ${result.imported.folders} folder(s)`,
-    "No browser bookmarks were written."
+    `Target file: ${result.bookmarksPath}`,
+    `Bookmarks imported: ${result.imported.bookmarks}`,
+    `Folders imported: ${result.imported.folders}`,
+    `Bookmarks to add: ${result.summary.addedBookmarks}`,
+    `Folders to create: ${result.summary.addedFolders}`,
+    `Duplicates to skip: ${result.summary.skippedDuplicates}`,
+    `Target folder exists: ${result.summary.targetFolderExisted ? "yes" : "no"}`,
+    `Target folder action: ${describeFolderAction(result.summary)}`,
+    "Dry run: no browser bookmarks were written."
   ].join("\n");
 }
 
 function formatImportBrowserResult(result) {
   const output = [
-    `Imported ${result.inputPath} to ${result.browserName} / ${result.profile}.`,
-    `Profile name: ${result.profileName}`,
-    `Imported: ${result.imported.bookmarks} bookmark(s), ${result.imported.folders} folder(s)`,
-    `Pushed: ${result.pushed} bookmark(s)`,
+    "Imported bookmarks into browser.",
+    `Input: ${result.inputPath}`,
+    `Target: ${result.browserName} / ${result.profileName} (${result.profile})`,
+    `Mode: ${result.mode}`,
+    `Bookmarks imported: ${result.imported.bookmarks}`,
+    `Folders imported: ${result.imported.folders}`,
+    `Bookmarks written: ${result.pushed}`,
+    `Folders created: ${result.summary.addedFolders}`,
+    `Duplicates skipped: ${result.summary.skippedDuplicates}`,
+    `Target folder action: ${describeFolderAction(result.summary)}`,
     `Target folder: Bookmarks Bar / ${result.folder}`,
-    `Bookmarks file: ${result.bookmarksPath}`,
-    `Backup: ${result.backupPath}`
+    `Target file: ${result.bookmarksPath}`,
+    result.backupPath ? `Backup: ${result.backupPath}` : "Backup: not created because no browser changes were needed"
   ];
 
   if (result.quitBrowser) {
@@ -744,12 +758,28 @@ function formatImportBrowserResult(result) {
   return output.join("\n");
 }
 
+function describeFolderAction(summary) {
+  if (summary.replacedFolder) {
+    return "replace existing folder";
+  }
+
+  if (summary.targetFolderCreated) {
+    return "create target folder";
+  }
+
+  if (summary.changed) {
+    return "merge into existing folder";
+  }
+
+  return "no change needed";
+}
+
 function printHelp() {
   console.log(`MarkBridge
 
 Usage:
   markbridge export-browser --browser chrome|edge --profile <profile> --output <output.html> [--folder name|path] [--folder-path path] [--dry-run]
-  markbridge import-browser --input <bookmarks.html> --browser chrome|edge --profile <profile> [--folder MarkBridge] [--quit-browser] [--reopen] [--dry-run]
+  markbridge import-browser --input <bookmarks.html> --browser chrome|edge --profile <profile> [--folder MarkBridge] [--mode merge|replace-folder|append] [--quit-browser] [--reopen] [--dry-run]
   markbridge import <bookmarks.html> [--mode merge|append|replace] [--dry-run] [--library path]
   markbridge list [--json]
   markbridge search <query> [--json]
@@ -760,7 +790,7 @@ Usage:
   markbridge browser backups --browser chrome|edge --profile <profile>
   markbridge browser restore --browser chrome|edge --profile <profile> --backup <path> [--quit-browser] [--reopen]
   markbridge pull-browser --browser chrome|edge --profile <profile> [--mode merge|append|replace] [--dry-run]
-  markbridge push-browser --browser chrome|edge --profile <profile> [--folder MarkBridge] [--quit-browser] [--reopen]
+  markbridge push-browser --browser chrome|edge --profile <profile> [--folder MarkBridge] [--mode merge|replace-folder|append] [--quit-browser] [--reopen]
   markbridge status
   markbridge where
 

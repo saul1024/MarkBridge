@@ -216,6 +216,18 @@ test("folder export requires an exact path when folder titles are ambiguous", ()
   assert.doesNotMatch(exported, /Other bookmarks/);
 });
 
+test("folder export error lists available folder paths", () => {
+  const { library } = importBookmarksHtml(readFixture("chrome-bookmarks.html"), {
+    now: FIXED_NOW,
+    batchId: "batch-folder-missing"
+  });
+
+  assert.throws(
+    () => exportBookmarksHtml(library, { folder: "Missing Folder" }),
+    /Available folders:\n  Bookmarks Bar\n  Bookmarks Bar \/ 中文资料\n  Bookmarks Bar \/ 空文件夹/
+  );
+});
+
 function readFixture(name) {
   return readFileSync(join(FIXTURE_DIR, name), "utf8");
 }

@@ -13,12 +13,14 @@ const execFileAsync = promisify(execFile);
 const CHROME_EPOCH_OFFSET_MS = 11644473600000n;
 const DEFAULT_TARGET_FOLDER = "MarkBridge";
 const DEFAULT_TARGET_ROOT = "bookmark_bar";
+const DEFAULT_BROWSER_PUSH_MODE = "replace-folder";
 const ROOT_ORDER = ["bookmark_bar", "other", "synced"];
 const ROOT_FALLBACK_NAMES = {
   bookmark_bar: "Bookmarks Bar",
   other: "Other Bookmarks",
   synced: "Mobile Bookmarks"
 };
+export const BROWSER_PUSH_MODES = new Set(["merge", "replace-folder", "append"]);
 
 export const SUPPORTED_BROWSERS = {
   chrome: {
@@ -110,6 +112,7 @@ export async function listBrowserProfiles(options = {}) {
 export async function pushLibraryToBrowser(library, options = {}) {
   const browser = normalizeBrowserKey(options.browser);
   const config = SUPPORTED_BROWSERS[browser];
+  const mode = normalizeBrowserPushMode(options.mode ?? DEFAULT_BROWSER_PUSH_MODE);
 
   if (!options.profile) {
     throw new Error(`Usage: markbridge push-browser --browser ${browser} --profile <profile>`);
@@ -151,13 +154,18 @@ export async function pushLibraryToBrowser(library, options = {}) {
     idFactory,
     now: options.now
   });
+  const summary = applyBrowserFolderToRoot(targetRoot, folder, { mode });
 
-  replaceFolder(targetRoot, folder);
-  delete bookmarksFile.checksum;
+  if (summary.changed) {
+    delete bookmarksFile.checksum;
+  }
 
-  const backupPath = createBackupPath(profile.bookmarksPath, options.now);
-  await copyFile(profile.bookmarksPath, backupPath);
-  await writeJsonAtomic(profile.bookmarksPath, bookmarksFile);
+  const backupPath = summary.changed ? createBackupPath(profile.bookmarksPath, options.now) : null;
+
+  if (summary.changed) {
+    await copyFile(profile.bookmarksPath, backupPath);
+    await writeJsonAtomic(profile.bookmarksPath, bookmarksFile);
+  }
 
   const result = {
     browser,
@@ -167,7 +175,10 @@ export async function pushLibraryToBrowser(library, options = {}) {
     bookmarksPath: profile.bookmarksPath,
     backupPath,
     folder: folderTitle,
-    pushed: stats.pushed,
+    mode,
+    pushed: summary.addedBookmarks,
+    plannedBookmarks: stats.pushed,
+    summary,
     root: targetRootKey,
     verifyUrl: config.verifyUrl,
     browserWasRunning,
@@ -181,6 +192,54 @@ export async function pushLibraryToBrowser(library, options = {}) {
   }
 
   return result;
+}
+
+export async function previewLibraryToBrowser(library, options = {}) {
+  const browser = normalizeBrowserKey(options.browser);
+  const config = SUPPORTED_BROWSERS[browser];
+  const mode = normalizeBrowserPushMode(options.mode ?? DEFAULT_BROWSER_PUSH_MODE);
+
+  if (!options.profile) {
+    throw new Error(`Usage: markbridge import-browser --browser ${browser} --profile <profile>`);
+  }
+
+  const profiles = await listBrowserProfiles({
+    browser,
+    browserRoot: options.browserRoot,
+    env: options.env
+  });
+  const profile = requireBrowserProfile(profiles, browser, options);
+  const bookmarksFile = structuredClone(await readBrowserBookmarksFile(profile.bookmarksPath));
+  const targetRootKey = options.targetRoot ?? DEFAULT_TARGET_ROOT;
+  const targetRoot = bookmarksFile.roots?.[targetRootKey];
+
+  if (!targetRoot || !Array.isArray(targetRoot.children)) {
+    throw new Error(`Unsupported browser bookmarks file: missing roots.${targetRootKey}.children in ${profile.bookmarksPath}`);
+  }
+
+  const idFactory = createChromeIdFactory(bookmarksFile);
+  const folderTitle = options.folder ?? DEFAULT_TARGET_FOLDER;
+  const { folder, stats } = buildBrowserFolderFromLibrary(library, {
+    folderTitle,
+    idFactory,
+    now: options.now
+  });
+  const summary = applyBrowserFolderToRoot(targetRoot, folder, { mode });
+
+  return {
+    browser,
+    browserName: config.name,
+    profile: profile.profile,
+    profileName: profile.name,
+    bookmarksPath: profile.bookmarksPath,
+    folder: folderTitle,
+    mode,
+    pushed: summary.addedBookmarks,
+    plannedBookmarks: stats.pushed,
+    summary,
+    root: targetRootKey,
+    verifyUrl: config.verifyUrl
+  };
 }
 
 export async function pullBrowserBookmarks(options = {}) {
@@ -629,6 +688,187 @@ function replaceFolder(targetRoot, folder) {
   targetRoot.date_modified = toChromeTimestamp();
 }
 
+function applyBrowserFolderToRoot(targetRoot, folder, options) {
+  const mode = normalizeBrowserPushMode(options.mode);
+  const existingFolders = targetRoot.children.filter((child) => child.type === "folder" && child.name === folder.name);
+  const summary = {
+    mode,
+    targetFolder: folder.name,
+    targetFolderExisted: existingFolders.length > 0,
+    targetFolderCreated: false,
+    replacedFolder: false,
+    addedBookmarks: 0,
+    addedFolders: 0,
+    skippedDuplicates: 0,
+    changed: false
+  };
+
+  if (mode === "replace-folder") {
+    replaceFolder(targetRoot, folder);
+    summary.replacedFolder = summary.targetFolderExisted;
+    summary.targetFolderCreated = !summary.targetFolderExisted;
+    summary.addedBookmarks = countChromeBookmarksUnder(folder);
+    summary.addedFolders = countChromeFoldersUnder(folder, { includeSelf: true });
+    summary.changed = true;
+    return summary;
+  }
+
+  if (mode === "append") {
+    targetRoot.children.push(folder);
+    targetRoot.date_modified = toChromeTimestamp();
+    summary.targetFolderCreated = true;
+    summary.addedBookmarks = countChromeBookmarksUnder(folder);
+    summary.addedFolders = countChromeFoldersUnder(folder, { includeSelf: true });
+    summary.changed = true;
+    return summary;
+  }
+
+  const targetFolder = existingFolders[0];
+
+  if (!targetFolder) {
+    targetRoot.children.push(folder);
+    targetRoot.date_modified = toChromeTimestamp();
+    summary.targetFolderCreated = true;
+    summary.addedBookmarks = countChromeBookmarksUnder(folder);
+    summary.addedFolders = countChromeFoldersUnder(folder, { includeSelf: true });
+    summary.changed = true;
+    return summary;
+  }
+
+  const existingUrls = collectChromeNormalizedUrls(targetFolder);
+  const beforeBookmarks = summary.addedBookmarks;
+  const beforeFolders = summary.addedFolders;
+
+  mergeChromeFolder(targetFolder, folder, {
+    existingUrls,
+    summary
+  });
+
+  summary.changed = summary.addedBookmarks > beforeBookmarks || summary.addedFolders > beforeFolders;
+
+  if (summary.changed) {
+    targetFolder.date_modified = toChromeTimestamp();
+    targetRoot.date_modified = toChromeTimestamp();
+  }
+
+  return summary;
+}
+
+function mergeChromeFolder(targetFolder, incomingFolder, context) {
+  for (const child of incomingFolder.children ?? []) {
+    if (child.type === "folder") {
+      const matchingFolder = (targetFolder.children ?? []).find((candidate) => candidate.type === "folder" && candidate.name === child.name);
+
+      if (matchingFolder) {
+        const beforeBookmarks = context.summary.addedBookmarks;
+        const beforeFolders = context.summary.addedFolders;
+
+        mergeChromeFolder(matchingFolder, child, context);
+
+        if (context.summary.addedBookmarks > beforeBookmarks || context.summary.addedFolders > beforeFolders) {
+          matchingFolder.date_modified = toChromeTimestamp();
+        }
+
+        continue;
+      }
+    }
+
+    const cloned = cloneChromeNodeForMerge(child, context);
+
+    if (cloned) {
+      targetFolder.children.push(cloned);
+    }
+  }
+}
+
+function cloneChromeNodeForMerge(node, context) {
+  if (node.type === "url") {
+    const normalizedUrl = normalizeUrl(node.url);
+
+    if (context.existingUrls.has(normalizedUrl)) {
+      context.summary.skippedDuplicates += 1;
+      return null;
+    }
+
+    context.existingUrls.add(normalizedUrl);
+    context.summary.addedBookmarks += 1;
+    return node;
+  }
+
+  if (node.type === "folder") {
+    const children = [];
+
+    for (const child of node.children ?? []) {
+      const cloned = cloneChromeNodeForMerge(child, context);
+
+      if (cloned) {
+        children.push(cloned);
+      }
+    }
+
+    if (children.length === 0) {
+      return null;
+    }
+
+    context.summary.addedFolders += 1;
+    return {
+      ...node,
+      children
+    };
+  }
+
+  return null;
+}
+
+function countChromeBookmarksUnder(node) {
+  if (!node) {
+    return 0;
+  }
+
+  if (node.type === "url") {
+    return node.url ? 1 : 0;
+  }
+
+  return (node.children ?? []).reduce((total, child) => total + countChromeBookmarksUnder(child), 0);
+}
+
+function countChromeFoldersUnder(node, options = {}) {
+  if (!node || node.type !== "folder") {
+    return 0;
+  }
+
+  const self = options.includeSelf ? 1 : 0;
+  return self + (node.children ?? []).reduce((total, child) => total + countChromeFoldersUnder(child, { includeSelf: true }), 0);
+}
+
+function collectChromeNormalizedUrls(node, urls = new Set()) {
+  if (!node) {
+    return urls;
+  }
+
+  if (node.type === "url" && node.url) {
+    urls.add(normalizeUrl(node.url));
+    return urls;
+  }
+
+  for (const child of node.children ?? []) {
+    collectChromeNormalizedUrls(child, urls);
+  }
+
+  return urls;
+}
+
+function normalizeBrowserPushMode(mode) {
+  const normalized = String(mode ?? DEFAULT_BROWSER_PUSH_MODE).toLowerCase();
+  const aliased = normalized === "replace" ? "replace-folder" : normalized;
+
+  if (!BROWSER_PUSH_MODES.has(aliased)) {
+    throw new Error(`Unsupported browser import mode: ${mode}. Supported modes: ${Array.from(BROWSER_PUSH_MODES).join(", ")}`);
+  }
+
+  return aliased;
+}
+
 function toChromeTimestamp(value = new Date().toISOString()) {
   const timestamp = Date.parse(value);
   const millis = Number.isFinite(timestamp) ? timestamp : Date.now();
@@ -668,7 +908,7 @@ async function writeJsonAtomic(path, value) {
 
 function createBackupPath(path, now = new Date().toISOString()) {
   const stamp = now.replace(/[-:.]/g, "").replace("T", "-").replace("Z", "Z");
-  return `${path}.markbridge-backup-${stamp}`;
+  return `${path}.markbridge-backup-${stamp}-${randomUUID().slice(0, 8)}`;
 }
 
 function requireBrowserProfile(profiles, browser, options) {
