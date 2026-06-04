@@ -122,7 +122,7 @@ export async function pushLibraryToBrowser(library, options = {}) {
 
   if (browserWasRunning) {
     if (!options.quitBrowser) {
-      throw new Error(`${config.name} appears to be running. Close it before push-browser, then run the command again, or add --quit-browser.`);
+      throw new Error(formatBrowserRunningError(config.name, "push-browser", options.retryHint));
     }
 
     await quitBrowser(browser, options);
@@ -381,7 +381,7 @@ export async function restoreBrowserBackup(options = {}) {
 
   if (browserWasRunning) {
     if (!options.quitBrowser) {
-      throw new Error(`${config.name} appears to be running. Close it before browser restore, then run the command again, or add --quit-browser.`);
+      throw new Error(formatBrowserRunningError(config.name, "browser restore", options.retryHint));
     }
 
     await quitBrowser(browser, options);
@@ -987,6 +987,14 @@ function compareProfiles(a, b) {
 
 function escapeAppleScriptString(value) {
   return String(value).replace(/\\/gu, "\\\\").replace(/"/gu, '\\"');
+}
+
+function formatBrowserRunningError(browserName, action, retryHint) {
+  return [
+    `${browserName} is running, so MarkBridge will not modify the browser Bookmarks file now.`,
+    `Close ${browserName} first, then run ${action} again.`,
+    retryHint ? `Suggested command:\n  ${retryHint}` : "Or re-run the command with --quit-browser --reopen."
+  ].join("\n");
 }
 
 function delay(ms) {

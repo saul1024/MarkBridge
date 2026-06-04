@@ -7,6 +7,8 @@ import { createEmptyLibrary } from "./model.js";
 
 export const LIBRARY_FILE_FORMAT = "markbridge-library";
 export const LIBRARY_FILE_VERSION = 1;
+export const SYNC_CONFIG_FILE_FORMAT = "markbridge-sync-config";
+export const SYNC_CONFIG_FILE_VERSION = 1;
 
 export function getMarkBridgeHome(env = process.env) {
   return env.MARKBRIDGE_HOME || join(homedir(), ".markbridge");
@@ -14,6 +16,10 @@ export function getMarkBridgeHome(env = process.env) {
 
 export function getDefaultLibraryPath(env = process.env) {
   return env.MARKBRIDGE_LIBRARY || join(getMarkBridgeHome(env), "library.json");
+}
+
+export function getDefaultSyncConfigPath(env = process.env) {
+  return env.MARKBRIDGE_SYNC_CONFIG || join(getMarkBridgeHome(env), "sync-config.json");
 }
 
 export async function loadLibrary(path = getDefaultLibraryPath()) {
@@ -58,3 +64,78 @@ export async function saveLibrary(library, path = getDefaultLibraryPath(), optio
   await rename(tempPath, path);
 }
 
+export async function loadSyncConfig(path = getDefaultSyncConfigPath()) {
+  if (!existsSync(path)) {
+    return null;
+  }
+
+  const raw = await readFile(path, "utf8");
+  const parsed = JSON.parse(raw);
+
+  if (parsed.format === SYNC_CONFIG_FILE_FORMAT && parsed.config) {
+    return parsed.config;
+  }
+
+  throw new Error(`Unsupported MarkBridge sync config file: ${path}`);
+}
+
+export async function saveSyncConfig(config, path = getDefaultSyncConfigPath(), options = {}) {
+  const now = options.now ?? new Date().toISOString();
+  const existing = await loadSyncConfigFile(path);
+  const file = {
+    format: SYNC_CONFIG_FILE_FORMAT,
+    formatVersion: SYNC_CONFIG_FILE_VERSION,
+    config: cleanSyncConfig(config),
+    createdAt: options.createdAt ?? existing?.createdAt ?? now,
+    updatedAt: now
+  };
+  const targetDir = dirname(path);
+  const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+
+  await mkdir(targetDir, { recursive: true });
+  await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+  await rename(tempPath, path);
+
+  return file;
+}
+
+async function loadSyncConfigFile(path) {
+  if (!existsSync(path)) {
+    return null;
+  }
+
+  const raw = await readFile(path, "utf8");
+  const parsed = JSON.parse(raw);
+
+  if (parsed.format === SYNC_CONFIG_FILE_FORMAT && parsed.config) {
+    return parsed;
+  }
+
+  throw new Error(`Unsupported MarkBridge sync config file: ${path}`);
+}
+
+function cleanSyncConfig(config) {
+  const cleaned = {};
+  const keys = [
+    "browser",
+    "profile",
+    "browserRoot",
+    "folder",
+    "folderPath",
+    "includeEmptyFolders",
+    "mode",
+    "remoteKey"
+  ];
+
+  for (const key of keys) {
+    const value = config[key];
+
+    if (value === undefined || value === null || value === false || value === "") {
+      continue;
+    }
+
+    cleaned[key] = value;
+  }
+
+  return cleaned;
+}

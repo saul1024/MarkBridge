@@ -21,9 +21,10 @@ test("pushLibraryToBrowser refuses to write while browser is running unless quit
         profile: "Default",
         browserRoot,
         env: { MARKBRIDGE_HOME: home },
-        isBrowserRunning: () => true
+        isBrowserRunning: () => true,
+        retryHint: "markbridge push-browser --browser chrome --profile Default --quit-browser --reopen"
       }),
-      /add --quit-browser/
+      /will not modify the browser Bookmarks file[\s\S]*Suggested command:[\s\S]*markbridge push-browser/
     );
   } finally {
     await cleanup();
@@ -159,9 +160,10 @@ test("restoreBrowserBackup refuses to restore while browser is running unless qu
         browserRoot,
         backupPath,
         env: { MARKBRIDGE_HOME: home },
-        isBrowserRunning: () => true
+        isBrowserRunning: () => true,
+        retryHint: "markbridge browser restore --browser chrome --profile Default --backup backup --quit-browser --reopen"
       }),
-      /add --quit-browser/
+      /will not modify the browser Bookmarks file[\s\S]*Suggested command:[\s\S]*markbridge browser restore/
     );
   } finally {
     await cleanup();

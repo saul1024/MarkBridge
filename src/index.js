@@ -1,7 +1,10 @@
 export { countExportedBookmarks, exportBookmarksHtml, listExportFolders, resolveExportFolder, shouldExportBookmark } from "./exporter.js";
 export { BROWSER_PUSH_MODES, getBrowserUserDataDir, isBrowserRunning, listBrowserBackups, listBrowserProfiles, normalizeBrowserKey, previewLibraryToBrowser, pullBrowserBookmarks, pushLibraryToBrowser, quitBrowser, reopenBrowser, restoreBrowserBackup, SUPPORTED_BROWSERS, waitForBrowserExit } from "./browser.js";
+export { CosError, createCosAuthorization, createCosClient, deleteCosFile, headCosFile, isCosNotFoundError, listCosFiles, loadCosConfig, pullCosFile, pushCosFile } from "./cos.js";
+export { loadEnvironment, parseDotenv } from "./env.js";
 export { importBookmarksHtml, parseAttributes } from "./importer.js";
 export { applyImportedLibrary, importLibraryIntoTarget, IMPORT_MODES, libraryStats, listBookmarks, mergeImportedLibrary, removeBookmarks, searchBookmarks, updateBookmark } from "./library.js";
 export { addBookmark, addFolder, createEmptyLibrary, createIdFactory, createRandomIdFactory, getChildren, isBookmark, isFolder } from "./model.js";
 export { normalizeUrl } from "./normalize.js";
-export { getDefaultLibraryPath, getMarkBridgeHome, loadLibrary, loadOrCreateLibrary, saveLibrary } from "./store.js";
+export { getDefaultLibraryPath, getDefaultSyncConfigPath, getMarkBridgeHome, loadLibrary, loadOrCreateLibrary, loadSyncConfig, saveLibrary, saveSyncConfig } from "./store.js";
+export { createDefaultRemoteKey, getSyncRemoteStatus, syncPullCloudToBrowser, syncPushBrowserToCloud } from "./sync.js";

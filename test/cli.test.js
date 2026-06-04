@@ -168,6 +168,177 @@ test("CLI export-browser exports a selected browser profile folder without writi
   }
 });
 
+test("CLI sync push-browser dry-run exports selected browser folder without uploading", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-push-"));
+  const env = {
+    ...process.env,
+    MARKBRIDGE_HOME: markbridgeHome,
+    SYNC_PROVIDER: "cos",
+    COS_ENDPOINT: "https://cos.ap-guangzhou.myqcloud.com",
+    COS_REGION: "ap-guangzhou",
+    COS_BUCKET: "markbridge-1250000000",
+    COS_SECRET_ID: "AKIDEXAMPLE",
+    COS_SECRET_KEY: "SECRETEXAMPLE"
+  };
+  const { browserRoot, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFileWithAllRoots());
+
+  try {
+    const result = await runCli([
+      "sync",
+      "push-browser",
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Nested Other",
+      "--dry-run",
+      "--json"
+    ], env);
+
+    assert.equal(result.provider, "cos");
+    assert.equal(result.bucket, "markbridge-1250000000");
+    assert.equal(result.dryRun, true);
+    assert.equal(result.uploaded, false);
+    assert.equal(result.remoteKey, "bookmarks/chrome/Test-Person/Other-bookmarks-Nested-Other.html");
+    assert.equal(result.profileName, "Test Person");
+    assert.equal(result.folder.path, "Other bookmarks / Nested Other");
+    assert.equal(result.exportedBookmarks, 1);
+    assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("CLI sync push-browser dry-run text explains the action without writing COS", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-push-text-"));
+  const env = {
+    ...process.env,
+    MARKBRIDGE_HOME: markbridgeHome,
+    SYNC_PROVIDER: "cos",
+    COS_ENDPOINT: "https://cos.ap-guangzhou.myqcloud.com",
+    COS_REGION: "ap-guangzhou",
+    COS_BUCKET: "markbridge-1250000000",
+    COS_SECRET_ID: "AKIDEXAMPLE",
+    COS_SECRET_KEY: "SECRETEXAMPLE"
+  };
+  const { browserRoot, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFileWithAllRoots());
+
+  try {
+    const { stdout } = await execFileAsync(process.execPath, [
+      CLI_PATH,
+      "sync",
+      "push-browser",
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Nested Other",
+      "--dry-run"
+    ], { env });
+
+    assert.match(stdout, /Preview only: no COS object will be written/);
+    assert.match(stdout, /Source: Google Chrome \/ Test Person \(Default\)/);
+    assert.match(stdout, /Folder: Other bookmarks \/ Nested Other/);
+    assert.match(stdout, /Remote: bookmarks\/chrome\/Test-Person\/Other-bookmarks-Nested-Other\.html/);
+    assert.match(stdout, /Action: would overwrite COS object/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("CLI sync setup saves defaults and short push uses them", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-setup-"));
+  const env = {
+    ...process.env,
+    MARKBRIDGE_HOME: markbridgeHome,
+    SYNC_PROVIDER: "cos",
+    COS_ENDPOINT: "https://cos.ap-guangzhou.myqcloud.com",
+    COS_REGION: "ap-guangzhou",
+    COS_BUCKET: "markbridge-1250000000",
+    COS_SECRET_ID: "AKIDEXAMPLE",
+    COS_SECRET_KEY: "SECRETEXAMPLE"
+  };
+  const { browserRoot, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFileWithAllRoots());
+
+  try {
+    const setup = await runCli([
+      "sync",
+      "setup",
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Nested Other",
+      "--mode", "merge",
+      "--json"
+    ], env);
+
+    assert.equal(setup.provider, "cos");
+    assert.equal(setup.bucket, "markbridge-1250000000");
+    assert.equal(setup.configPath, join(markbridgeHome, "sync-config.json"));
+    assert.equal(setup.config.browser, "chrome");
+    assert.equal(setup.config.profile, "Default");
+    assert.equal(setup.config.browserRoot, browserRoot);
+    assert.equal(setup.config.folder, "Nested Other");
+    assert.equal(setup.config.mode, "merge");
+    assert.equal(setup.config.remoteKey, "bookmarks/chrome/Test-Person/Other-bookmarks-Nested-Other.html");
+    assert.equal(setup.preview.dryRun, true);
+    assert.equal(setup.preview.uploaded, false);
+    assert.equal(existsSync(join(markbridgeHome, "sync-config.json")), true);
+
+    const status = await runCli(["sync", "status", "--json"], env);
+    assert.equal(status.configPath, join(markbridgeHome, "sync-config.json"));
+    assert.equal(status.config.remoteKey, "bookmarks/chrome/Test-Person/Other-bookmarks-Nested-Other.html");
+
+    const push = await runCli(["sync", "push", "--dry-run", "--json"], env);
+    assert.equal(push.provider, "cos");
+    assert.equal(push.bucket, "markbridge-1250000000");
+    assert.equal(push.configPath, join(markbridgeHome, "sync-config.json"));
+    assert.equal(push.dryRun, true);
+    assert.equal(push.uploaded, false);
+    assert.equal(push.remoteKey, "bookmarks/chrome/Test-Person/Other-bookmarks-Nested-Other.html");
+    assert.equal(push.profileName, "Test Person");
+    assert.equal(push.folder.path, "Other bookmarks / Nested Other");
+    assert.equal(push.exportedBookmarks, 1);
+    assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("CLI short sync pull requires explicit preview or apply", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-pull-guard-"));
+  const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
+
+  try {
+    const result = await execFileAsync(process.execPath, [CLI_PATH, "sync", "pull"], { env })
+      .then(() => ({ code: 0, stderr: "" }))
+      .catch((error) => ({ code: error.code, stderr: error.stderr }));
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /sync pull --dry-run/);
+    assert.match(result.stderr, /sync pull --apply/);
+  } finally {
+    await rm(markbridgeHome, { recursive: true, force: true });
+  }
+});
+
+test("CLI sync check explains missing defaults with the next command", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-check-missing-"));
+  const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
+
+  try {
+    const result = await execFileAsync(process.execPath, [CLI_PATH, "sync", "check"], { env })
+      .then((output) => ({ code: 0, stdout: output.stdout, stderr: output.stderr }))
+      .catch((error) => ({ code: error.code, stdout: error.stdout, stderr: error.stderr }));
+
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /Sync check: failed/);
+    assert.match(result.stdout, /\[FAIL\] Sync defaults/);
+    assert.match(result.stdout, /Next: markbridge sync setup --browser chrome --profile <profile> --folder <folder>/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await rm(markbridgeHome, { recursive: true, force: true });
+  }
+});
+
 test("CLI import-browser imports HTML directly into a browser profile", async () => {
   const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-import-browser-"));
   const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
