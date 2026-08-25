@@ -70,6 +70,60 @@
       </div>
     </section>
 
+    <section class="card" id="htmlio">
+      <h2>HTML</h2>
+
+      <div class="grid">
+        <fieldset>
+          <legend>导出</legend>
+          <label>浏览器
+            <select id="exportBrowser"></select>
+          </label>
+          <label>Profile
+            <select id="exportProfile"></select>
+          </label>
+          <label>文件夹
+            <select id="exportFolder"></select>
+          </label>
+          <div class="actions">
+            <button type="button" class="primary" id="exportPreviewBtn">预览</button>
+            <button type="button" class="secondary" id="exportHtmlBtn">导出 HTML</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>导入</legend>
+          <label>HTML 文件
+            <input id="importFile" type="file" accept=".html,text/html">
+          </label>
+          <label>浏览器
+            <select id="importBrowser"></select>
+          </label>
+          <label>Profile
+            <select id="importProfile"></select>
+          </label>
+          <label>写入文件夹名
+            <input id="importFolder" type="text" value="MarkBridge" autocomplete="off" spellcheck="false">
+          </label>
+          <label>模式
+            <select id="importMode">
+              <option value="merge">合并去重</option>
+              <option value="replace-folder">替换该文件夹</option>
+              <option value="append">追加</option>
+            </select>
+          </label>
+          <label class="check">
+            <input id="importQuit" type="checkbox">
+            执行时退出目标浏览器
+          </label>
+          <div class="actions">
+            <button type="button" class="primary" id="importPreviewBtn">预览</button>
+            <button type="button" class="danger" id="importApplyBtn" disabled>执行</button>
+          </div>
+        </fieldset>
+      </div>
+    </section>
+
     <section class="card" id="sync">
       <h2>COS 同步</h2>
 

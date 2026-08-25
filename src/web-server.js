@@ -282,6 +282,26 @@ async function routeApi(req, res, url, pathname, deps) {
     return true;
   }
 
+  if (pathname === "/api/export" && req.method === "GET") {
+    sendHtmlAttachment(res, await handleExportDownload(url, deps));
+    return true;
+  }
+
+  if (pathname === "/api/export/preview" && req.method === "POST") {
+    sendJson(res, 200, { ok: true, data: await handleExportPreview(await readJsonBody(req), deps) });
+    return true;
+  }
+
+  if (pathname === "/api/import/preview" && req.method === "POST") {
+    sendJson(res, 200, { ok: true, data: await handleImport(await readJsonBody(req), deps, { dryRun: true }) });
+    return true;
+  }
+
+  if (pathname === "/api/import" && req.method === "POST") {
+    sendJson(res, 200, { ok: true, data: await handleImport(await readJsonBody(req), deps, { dryRun: false }) });
+    return true;
+  }
+
   sendJson(res, 404, { ok: false, error: `Not found: ${pathname}` });
   return true;
 }
@@ -452,6 +472,117 @@ async function handleSyncPull(body, deps, options) {
     cos: publicCosConfig(cos.raw),
     ...publicSyncResult(result)
   };
+}
+
+async function handleExportDownload(url, deps) {
+  const browser = requiredQuery(url, "browser");
+  const profile = requiredQuery(url, "profile");
+  const folderPath = optionalQuery(url, "folderPath");
+  const built = await buildExport(deps, { browser, profile, folderPath });
+  return {
+    html: built.html,
+    filename: exportAttachmentFilename(browser, profile, built.folder)
+  };
+}
+
+async function handleExportPreview(body, deps) {
+  const browser = requiredString(body.browser, "browser");
+  const profile = requiredString(body.profile, "profile");
+  const folderPath = optionalString(body.folderPath);
+  const built = await buildExport(deps, { browser, profile, folderPath });
+  return {
+    exportedBookmarks: built.exportedBookmarks,
+    folder: built.folder,
+    size: built.size
+  };
+}
+
+async function buildExport(deps, options) {
+  const pulled = await deps.pullBrowserBookmarks({
+    browser: options.browser,
+    profile: options.profile,
+    env: deps.env
+  });
+  const exportOptions = options.folderPath ? { folderPath: options.folderPath } : {};
+  const folder = options.folderPath
+    ? resolveExportFolder(pulled.library, exportOptions)
+    : null;
+  const html = exportBookmarksHtml(pulled.library, exportOptions);
+  return {
+    html,
+    folder,
+    exportedBookmarks: countExportedBookmarks(pulled.library, exportOptions),
+    size: Buffer.byteLength(html, "utf8")
+  };
+}
+
+async function handleImport(body, deps, options) {
+  const html = requiredString(body.html, "html");
+  const browser = requiredString(body.browser, "browser");
+  const profile = requiredString(body.profile, "profile");
+  const folder = optionalString(body.folder) || "MarkBridge";
+  const mode = optionalString(body.mode) || "merge";
+
+  if (mode && !BROWSER_PUSH_MODES.has(mode) && mode !== "replace") {
+    throw createHttpError(400, `Unsupported browser import mode: ${mode}. Supported modes: ${Array.from(BROWSER_PUSH_MODES).join(", ")}`);
+  }
+
+  const imported = importBookmarksHtml(html, {
+    sourceFileName: optionalString(body.sourceFileName) || "upload.html",
+    sourceBrowser: browser
+  });
+  const pushOptions = {
+    browser,
+    profile,
+    folder,
+    mode,
+    env: deps.env,
+    quitBrowser: Boolean(body.quitBrowser),
+    reopen: Boolean(body.reopen),
+    skipRunningCheck: Boolean(body.skipRunningCheck)
+  };
+
+  if (options.dryRun) {
+    const preview = await deps.previewLibraryToBrowser(imported.library, pushOptions);
+    return {
+      dryRun: true,
+      written: false,
+      imported: imported.importBatch.stats,
+      ...publicPushResult(preview),
+      quitBrowser: Boolean(body.quitBrowser)
+    };
+  }
+
+  const pushed = await deps.pushLibraryToBrowser(imported.library, pushOptions);
+  return {
+    dryRun: false,
+    written: true,
+    imported: imported.importBatch.stats,
+    ...publicPushResult(pushed),
+    quitBrowser: Boolean(body.quitBrowser)
+  };
+}
+
+function exportAttachmentFilename(browser, profile, folder) {
+  const raw = ["markbridge", browser, profile, folder?.title || folder?.path]
+    .filter(Boolean)
+    .join("-");
+  const slug = raw
+    .replace(/[^\p{L}\p{N}.-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 80);
+  return `${slug || "markbridge-bookmarks"}.html`;
+}
+
+function sendHtmlAttachment(res, payload) {
+  const body = Buffer.from(payload.html, "utf8");
+  res.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "content-disposition": `attachment; filename="${payload.filename}"`,
+    "cache-control": "no-store",
+    "content-length": body.length
+  });
+  res.end(body);
 }
 
 async function handleCopy(body, deps, options) {

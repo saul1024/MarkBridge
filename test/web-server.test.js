@@ -41,6 +41,7 @@ test("web server binds 127.0.0.1 and reports health", async () => {
       assert.match(html, /127\.0\.0\.1/);
       assert.match(html, /跨 Profile 复制/);
       assert.match(html, /COS 同步/);
+      assert.match(html, /导出 HTML/);
       assert.doesNotMatch(html, /lorem ipsum/i);
     } finally {
       await closeServer(server);
@@ -142,6 +143,122 @@ test("copy preview does not write bookmarks file", async () => {
       assert.equal(await readFile(fixture.sourceBookmarksPath, "utf8"), beforeSource);
       assert.equal(await readFile(fixture.destBookmarksPath, "utf8"), beforeDest);
       assert.doesNotMatch(beforeDest, /ImportedBooks/);
+    } finally {
+      await closeServer(server);
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("export preview returns count and does not change Bookmarks file", async () => {
+  const fixture = await createFixtureProfiles();
+
+  try {
+    const beforeSource = await readFile(fixture.sourceBookmarksPath, "utf8");
+    const server = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      env: fixture.env,
+      cwd: fixture.home
+    });
+
+    try {
+      const url = getWebListenUrl(server);
+      const body = await fetchJson(url, "/api/export/preview", {
+        browser: "chrome",
+        profile: "Default"
+      });
+
+      assert.equal(body.ok, true);
+      assert.equal(body.data.exportedBookmarks, 3);
+      assert.equal(body.data.folder, null);
+      assert.ok(body.data.size > 0);
+      assert.equal(await readFile(fixture.sourceBookmarksPath, "utf8"), beforeSource);
+    } finally {
+      await closeServer(server);
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("GET /api/export returns html containing a known bookmark title", async () => {
+  const fixture = await createFixtureProfiles();
+
+  try {
+    const beforeSource = await readFile(fixture.sourceBookmarksPath, "utf8");
+    const server = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      env: fixture.env,
+      cwd: fixture.home
+    });
+
+    try {
+      const url = getWebListenUrl(server);
+      const missing = await fetch(`${url}/api/export`);
+      const missingBody = await missing.json();
+      assert.equal(missing.status, 400);
+      assert.equal(missingBody.ok, false);
+      assert.match(missingBody.error, /browser/);
+
+      const response = await fetch(`${url}/api/export?browser=chrome&profile=Default`);
+      const html = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+      assert.match(response.headers.get("content-disposition") ?? "", /attachment/);
+      assert.match(response.headers.get("content-disposition") ?? "", /\.html/);
+      assert.match(html, /NETSCAPE-Bookmark-file-1/);
+      assert.match(html, /Node Handbook/);
+      assert.equal(await readFile(fixture.sourceBookmarksPath, "utf8"), beforeSource);
+    } finally {
+      await closeServer(server);
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("import preview does not write Bookmarks", async () => {
+  const fixture = await createFixtureProfiles();
+
+  try {
+    const beforeDest = await readFile(fixture.destBookmarksPath, "utf8");
+    const server = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      env: fixture.env,
+      cwd: fixture.home
+    });
+
+    try {
+      const url = getWebListenUrl(server);
+      const html = [
+        "<!DOCTYPE NETSCAPE-Bookmark-file-1>",
+        "<TITLE>Bookmarks</TITLE>",
+        "<H1>Bookmarks</H1>",
+        "<DL><p>",
+        '    <DT><A HREF="https://imported.example.com">Imported Example</A>',
+        "</DL><p>",
+        ""
+      ].join("\n");
+      const body = await fetchJson(url, "/api/import/preview", {
+        html,
+        browser: "chrome",
+        profile: "Profile 1",
+        folder: "ImportedHtml",
+        mode: "merge"
+      });
+
+      assert.equal(body.ok, true);
+      assert.equal(body.data.dryRun, true);
+      assert.equal(body.data.written, false);
+      assert.equal(body.data.imported.bookmarks, 1);
+      assert.equal(body.data.folder, "ImportedHtml");
+      assert.equal(await readFile(fixture.destBookmarksPath, "utf8"), beforeDest);
+      assert.doesNotMatch(beforeDest, /ImportedHtml/);
+      assert.doesNotMatch(beforeDest, /Imported Example/);
     } finally {
       await closeServer(server);
     }

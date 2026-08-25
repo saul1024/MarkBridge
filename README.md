@@ -21,7 +21,7 @@ MarkBridge 是一个面向跨浏览器、跨 Profile 书签迁移的 CLI。它�
 - 一条命令将浏览器指定书签目录同步上传到腾讯云 COS。
 - 一条命令从腾讯云 COS 拉取 HTML 并预览或导入指定浏览器 Profile。
 - 将导出的 HTML 上传到腾讯云 COS，并从 COS 下载到本地。
-- 在本机打开网页：`markbridge web`，用浏览器选择 Profile / 文件夹并预览、执行复制或同步。
+- 在本机打开网页：`markbridge web`，用浏览器选择 Profile / 文件夹并预览、执行复制或同步，也可导出和导入 HTML。
 
 ## 数据流向
 

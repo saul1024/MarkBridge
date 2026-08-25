@@ -2,6 +2,7 @@
   const state = {
     profiles: [],
     copyPreviewOk: false,
+    importPreviewOk: false,
     pushPreviewOk: false,
     pullPreviewOk: false,
     pushConflict: false
@@ -19,6 +20,19 @@
     copyQuit: $("copyQuit"),
     copyPreviewBtn: $("copyPreviewBtn"),
     copyApplyBtn: $("copyApplyBtn"),
+    exportBrowser: $("exportBrowser"),
+    exportProfile: $("exportProfile"),
+    exportFolder: $("exportFolder"),
+    exportPreviewBtn: $("exportPreviewBtn"),
+    exportHtmlBtn: $("exportHtmlBtn"),
+    importFile: $("importFile"),
+    importBrowser: $("importBrowser"),
+    importProfile: $("importProfile"),
+    importFolder: $("importFolder"),
+    importMode: $("importMode"),
+    importQuit: $("importQuit"),
+    importPreviewBtn: $("importPreviewBtn"),
+    importApplyBtn: $("importApplyBtn"),
     syncSetupState: $("syncSetupState"),
     syncCosState: $("syncCosState"),
     syncRemoteState: $("syncRemoteState"),
@@ -57,6 +71,21 @@
     els.copyQuit.addEventListener("change", invalidateCopy);
     els.copyPreviewBtn.addEventListener("click", previewCopy);
     els.copyApplyBtn.addEventListener("click", applyCopy);
+    els.exportBrowser.addEventListener("change", onExportBrowserChange);
+    els.exportProfile.addEventListener("change", onExportProfileChange);
+    els.importBrowser.addEventListener("change", () => {
+      fillProfileSelect(els.importProfile, els.importBrowser.value);
+      invalidateImport();
+    });
+    els.importProfile.addEventListener("change", invalidateImport);
+    els.importFolder.addEventListener("input", invalidateImport);
+    els.importMode.addEventListener("change", invalidateImport);
+    els.importQuit.addEventListener("change", invalidateImport);
+    els.importFile.addEventListener("change", invalidateImport);
+    els.exportPreviewBtn.addEventListener("click", previewExport);
+    els.exportHtmlBtn.addEventListener("click", downloadExport);
+    els.importPreviewBtn.addEventListener("click", previewImport);
+    els.importApplyBtn.addEventListener("click", applyImport);
     els.syncRefreshBtn.addEventListener("click", () => loadSyncStatus({ silent: false }));
     els.syncSetupBtn.addEventListener("click", saveSetup);
     els.pushPreviewBtn.addEventListener("click", previewPush);
@@ -95,24 +124,37 @@
       state.profiles = data.profiles ?? [];
       fillBrowserSelect(els.fromBrowser);
       fillBrowserSelect(els.toBrowser);
+      fillBrowserSelect(els.exportBrowser);
+      fillBrowserSelect(els.importBrowser);
 
       if (state.profiles.length === 0) {
         fillProfileSelect(els.fromProfile, els.fromBrowser.value);
         fillProfileSelect(els.toProfile, els.toBrowser.value);
+        fillProfileSelect(els.exportProfile, els.exportBrowser.value);
+        fillProfileSelect(els.importProfile, els.importBrowser.value);
         els.fromFolder.innerHTML = "";
         addOption(els.fromFolder, "", "未找到书签文件夹");
+        els.exportFolder.innerHTML = "";
+        addOption(els.exportFolder, "", "未找到书签文件夹");
         setStatus("没有读到 Chrome / Edge Profile。请在有浏览器用户数据的这台电脑上运行 markbridge web。");
         return;
       }
 
       fillProfileSelect(els.fromProfile, els.fromBrowser.value);
       fillProfileSelect(els.toProfile, els.toBrowser.value);
+      fillProfileSelect(els.exportProfile, els.exportBrowser.value);
+      fillProfileSelect(els.importProfile, els.importBrowser.value);
 
       if (els.toProfile.options.length > 1) {
         els.toProfile.selectedIndex = Math.min(1, els.toProfile.options.length - 1);
       }
 
+      if (els.importProfile.options.length > 1) {
+        els.importProfile.selectedIndex = Math.min(1, els.importProfile.options.length - 1);
+      }
+
       await loadFolders();
+      await loadExportFolders();
       setStatus(`已读取 ${state.profiles.length} 个本机 Profile。跨账号复制请先点「预览复制」。`);
     } catch (error) {
       setStatus(error.message, { error: true });
@@ -176,30 +218,45 @@
   }
 
   async function loadFolders() {
-    const browser = els.fromBrowser.value;
-    const profile = els.fromProfile.value;
-    els.fromFolder.innerHTML = "";
+    await loadFolderSelect(els.fromFolder, els.fromBrowser.value, els.fromProfile.value, "先选择源 Profile");
+  }
+
+  async function loadExportFolders() {
+    await loadFolderSelect(els.exportFolder, els.exportBrowser.value, els.exportProfile.value, "先选择 Profile");
+  }
+
+  async function loadFolderSelect(select, browser, profile, emptyLabel) {
+    select.innerHTML = "";
 
     if (!browser || !profile) {
-      addOption(els.fromFolder, "", "先选择源 Profile");
+      addOption(select, "", emptyLabel);
       return;
     }
 
-    addOption(els.fromFolder, "", "正在读取文件夹…");
+    addOption(select, "", "正在读取文件夹…");
 
     try {
       const data = await api(`/api/folders?browser=${encodeURIComponent(browser)}&profile=${encodeURIComponent(profile)}`);
-      els.fromFolder.innerHTML = "";
+      select.innerHTML = "";
 
       for (const folder of data.folders ?? []) {
         const suffix = typeof folder.bookmarkCount === "number" ? ` · ${folder.bookmarkCount} 条` : "";
-        addOption(els.fromFolder, folder.all ? "" : folder.path, `${folder.title}${suffix}`);
+        addOption(select, folder.all ? "" : folder.path, `${folder.title}${suffix}`);
       }
     } catch (error) {
-      els.fromFolder.innerHTML = "";
-      addOption(els.fromFolder, "", "读取文件夹失败");
+      select.innerHTML = "";
+      addOption(select, "", "读取文件夹失败");
       setStatus(error.message, { error: true });
     }
+  }
+
+  async function onExportBrowserChange() {
+    fillProfileSelect(els.exportProfile, els.exportBrowser.value);
+    await loadExportFolders();
+  }
+
+  async function onExportProfileChange() {
+    await loadExportFolders();
   }
 
   async function previewCopy() {
@@ -250,6 +307,120 @@
     }
 
     return payload;
+  }
+
+  async function previewExport() {
+    try {
+      const data = await api("/api/export/preview", { method: "POST", body: exportPayload() });
+      setStatus(`导出预览：${data.exportedBookmarks ?? "?"} 条 · ${data.folder?.path || "全部书签"} · ${data.size ?? "?"} bytes`, {
+        ok: true,
+        details: data
+      });
+    } catch (error) {
+      setStatus(error.message, { error: true });
+    }
+  }
+
+  async function downloadExport() {
+    const payload = exportPayload();
+    const params = new URLSearchParams({
+      browser: payload.browser,
+      profile: payload.profile
+    });
+
+    if (payload.folderPath) {
+      params.set("folderPath", payload.folderPath);
+    }
+
+    try {
+      const response = await fetch(`/api/export?${params}`);
+      const contentType = response.headers.get("content-type") || "";
+
+      if (!response.ok || !contentType.includes("text/html")) {
+        let message = `导出失败（${response.status}）`;
+
+        try {
+          const payloadJson = await response.json();
+          message = payloadJson.error || message;
+        } catch {
+          // Keep the HTTP status message when the body is not JSON.
+        }
+
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const filename = filenameFromDisposition(response.headers.get("content-disposition"));
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(href);
+      setStatus(`已下载 ${filename}`, { ok: true });
+    } catch (error) {
+      setStatus(error.message, { error: true });
+    }
+  }
+
+  function exportPayload() {
+    const payload = {
+      browser: els.exportBrowser.value,
+      profile: els.exportProfile.value
+    };
+
+    if (els.exportFolder.value) {
+      payload.folderPath = els.exportFolder.value;
+    }
+
+    return payload;
+  }
+
+  async function previewImport() {
+    invalidateImport();
+
+    try {
+      const data = await api("/api/import/preview", { method: "POST", body: await importPayload() });
+      state.importPreviewOk = true;
+      els.importApplyBtn.disabled = false;
+      setStatus(formatImport(data), { ok: true, details: data });
+    } catch (error) {
+      setStatus(error.message, { error: true });
+    }
+  }
+
+  async function applyImport() {
+    if (!state.importPreviewOk) {
+      return;
+    }
+
+    try {
+      const data = await api("/api/import", { method: "POST", body: await importPayload() });
+      invalidateImport();
+      setStatus(formatImport(data), { ok: true, details: data });
+    } catch (error) {
+      setStatus(error.message, { error: true });
+    }
+  }
+
+  async function importPayload() {
+    const file = els.importFile.files[0];
+
+    if (!file) {
+      throw new Error("请选择 HTML 文件");
+    }
+
+    return {
+      html: await file.text(),
+      browser: els.importBrowser.value,
+      profile: els.importProfile.value,
+      folder: els.importFolder.value.trim() || "MarkBridge",
+      mode: els.importMode.value,
+      quitBrowser: els.importQuit.checked,
+      sourceFileName: file.name
+    };
   }
 
   async function loadSyncStatus(options = {}) {
@@ -378,6 +549,11 @@
     els.copyApplyBtn.disabled = true;
   }
 
+  function invalidateImport() {
+    state.importPreviewOk = false;
+    els.importApplyBtn.disabled = true;
+  }
+
   function invalidatePush() {
     state.pushPreviewOk = false;
     state.pushConflict = false;
@@ -394,6 +570,17 @@
   function invalidateSyncActions() {
     invalidatePush();
     invalidatePull();
+  }
+
+  function formatImport(data) {
+    const verb = data.dryRun ? "导入预览（未写入目标 Bookmarks 文件）" : "已写入目标 Profile";
+    return [
+      verb,
+      `导入 ${data.imported?.bookmarks ?? "?"} 条到 ${data.browserName || data.browser} / ${data.profileName || data.profile} → ${data.folder} · 模式 ${data.mode}`,
+      `计划写入 ${data.plannedBookmarks ?? data.pushed ?? "?"} 条`,
+      data.backupPath ? `备份：${data.backupPath}` : "",
+      data.quitBrowser ? "已勾选退出浏览器。" : "未勾选退出浏览器：若目标浏览器开着，写入可能被覆盖。"
+    ].filter(Boolean).join("\n");
   }
 
   function formatCopy(data) {
@@ -479,6 +666,11 @@
       : message;
     els.statusBox.classList.toggle("error", Boolean(options.error));
     els.statusBox.classList.toggle("ok", Boolean(options.ok) && !options.error);
+  }
+
+  function filenameFromDisposition(header) {
+    const match = String(header ?? "").match(/filename\*?=(?:UTF-8''|"?)([^";]+)/iu);
+    return match ? decodeURIComponent(match[1].replace(/"/g, "").trim()) : "bookmarks.html";
   }
 
   function addOption(select, value, label) {
