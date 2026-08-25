@@ -23,22 +23,37 @@ export function exportBookmarksHtml(library, options = {}) {
   return `${lines.join("\n")}\n`;
 }
 
-export function resolveExportFolder(library, options = {}) {
+export function matchExportFolders(library, options = {}) {
   if (options.folderId) {
     const item = library.items[options.folderId];
 
     if (!isFolder(item) || item.deletedAt) {
-      throw new Error(`Folder not found: ${options.folderId}`);
+      return {
+        selector: String(options.folderId),
+        matches: [],
+        folders: listExportFolders(library),
+        reason: "not-found"
+      };
     }
 
-    return describeFolder(library, item);
+    return {
+      selector: String(options.folderId),
+      matches: [describeFolder(library, item)],
+      folders: listExportFolders(library),
+      reason: "ok"
+    };
   }
 
   const folderPath = normalizeFolderPath(options.folderPath);
   const folder = normalizeFolderPath(options.folder);
 
   if (!folderPath && !folder) {
-    return null;
+    return {
+      selector: "",
+      matches: [],
+      folders: listExportFolders(library),
+      reason: "none"
+    };
   }
 
   const selector = folderPath || folder;
@@ -48,22 +63,40 @@ export function resolveExportFolder(library, options = {}) {
     : findFolderMatches(folders, selector);
 
   if (matches.length === 1) {
-    return matches[0];
+    return { selector, matches, folders, reason: "ok" };
   }
 
   if (matches.length > 1) {
+    return { selector, matches, folders, reason: "ambiguous" };
+  }
+
+  return { selector, matches: [], folders, reason: "not-found" };
+}
+
+export function resolveExportFolder(library, options = {}) {
+  const matched = matchExportFolders(library, options);
+
+  if (matched.reason === "none") {
+    return null;
+  }
+
+  if (matched.reason === "ok") {
+    return matched.matches[0];
+  }
+
+  if (matched.reason === "ambiguous") {
     throw new Error([
-      `Folder selector is ambiguous: ${selector}`,
+      `Folder selector is ambiguous: ${matched.selector}`,
       "Matched folders:",
-      ...matches.map((match) => `  ${match.path}`),
+      ...matched.matches.map((match) => `  ${match.path}`),
       "Use --folder-path with one exact path."
     ].join("\n"));
   }
 
   throw new Error([
-    `Folder not found: ${selector}`,
+    `Folder not found: ${matched.selector}`,
     "Available folders:",
-    ...formatFolderList(folders),
+    ...formatFolderList(matched.folders),
     "Retry with --folder-path and one exact path."
   ].join("\n"));
 }

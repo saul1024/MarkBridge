@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 
-import { countExportedBookmarks, deleteCosFile, exportBookmarksHtml, getSyncRemoteStatus, importBookmarksHtml, isCosNotFoundError, listBrowserBackups, listBrowserProfiles, listCosFiles, loadCosConfig, loadEnvironment, previewLibraryToBrowser, pullBrowserBookmarks, pullCosFile, pushLibraryToBrowser, pushCosFile, resolveExportFolder, restoreBrowserBackup, syncPullCloudToBrowser, syncPushBrowserToCloud } from "../src/index.js";
+import { countExportedBookmarks, deleteCosFile, exportBookmarksHtml, getSyncRemoteStatus, importBookmarksHtml, isCosNotFoundError, listBrowserBackups, listBrowserProfiles, listCosFiles, loadCosConfig, loadEnvironment, previewLibraryToBrowser, pullBrowserBookmarks, pullCosFile, pushLibraryToBrowser, pushCosFile, resolveBrowserProfileFolder, resolveExportFolderInteractively, restoreBrowserBackup, syncPullCloudToBrowser, syncPushBrowserToCloud } from "../src/index.js";
 import {
   applyImportedLibrary,
   libraryStats,
@@ -195,7 +195,7 @@ async function commandExport(args, flags, libraryPath) {
     folder: flags.folder,
     folderPath: flags.folderPath
   };
-  const folderScope = resolveExportFolder(library, exportOptions);
+  const folderScope = await resolveExportFolderInteractively(library, exportOptions, cliPromptOptions(flags));
   const exportedBookmarks = countExportedBookmarks(library, {
     ...exportOptions,
     folderId: folderScope?.id
@@ -214,28 +214,29 @@ async function commandExport(args, flags, libraryPath) {
 }
 
 async function commandExportBrowser(args, flags) {
+  const usage = "Usage: markbridge export-browser --browser chrome --profile <profile> --output <output.html> [--folder name|path] [--folder-path path] [--dry-run]";
   const outputPath = expandUserPath(valueFromFlagOrArg(flags.output, args[0]));
 
-  if (!flags.browser || !flags.profile || !outputPath) {
-    throw new Error("Usage: markbridge export-browser --browser chrome --profile <profile> --output <output.html> [--folder name|path] [--folder-path path] [--dry-run]");
+  if (!outputPath || flags.output === true || flags.folder === true || flags.folderPath === true) {
+    throw new Error(usage);
   }
 
-  if (flags.output === true || flags.folder === true || flags.folderPath === true) {
-    throw new Error("Usage: markbridge export-browser --browser chrome --profile <profile> --output <output.html> [--folder name|path] [--folder-path path] [--dry-run]");
-  }
-
-  const pulled = await pullBrowserBookmarks({
-    browser: flags.browser,
-    profile: flags.profile,
-    browserRoot: expandUserPath(flags.browserRoot),
+  const targets = await resolveCliBrowserTargets(flags, {
+    usage,
+    promptFolder: true
+  });
+  const pulled = targets.pulled ?? await pullBrowserBookmarks({
+    browser: targets.browser,
+    profile: targets.profile,
+    browserRoot: targets.browserRoot,
     env: process.env
   });
   const exportOptions = {
     includeEmptyFolders: Boolean(flags.includeEmptyFolders),
-    folder: flags.folder,
-    folderPath: flags.folderPath
+    folder: targets.folder,
+    folderPath: targets.folderPath
   };
-  const folderScope = resolveExportFolder(pulled.library, exportOptions);
+  const folderScope = await resolveExportFolderInteractively(pulled.library, exportOptions, cliPromptOptions(flags));
   const exportedBookmarks = countExportedBookmarks(pulled.library, {
     ...exportOptions,
     folderId: folderScope?.id
@@ -530,23 +531,23 @@ async function commandSync(args, flags) {
 async function commandSyncSetup(flags) {
   const usage = "Usage: markbridge sync setup --browser chrome --profile <profile> [--folder name|path] [--folder-path path] [--mode merge|replace-folder|append] [--remote <object-key>]";
 
-  if (!flags.browser || !flags.profile) {
-    throw new Error(usage);
-  }
-
   if (flags.browser === true || flags.profile === true || flags.remote === true || flags.folder === true || flags.folderPath === true || flags.mode === true) {
     throw new Error(usage);
   }
 
+  const targets = await resolveCliBrowserTargets(flags, {
+    usage,
+    promptFolder: true
+  });
   const env = await loadEnvironmentForCli(flags);
   const config = loadCosConfig(env);
   const preview = await syncPushBrowserToCloud({
     config,
-    browser: flags.browser,
-    profile: flags.profile,
-    browserRoot: expandUserPath(flags.browserRoot),
-    folder: flags.folder,
-    folderPath: flags.folderPath,
+    browser: targets.browser,
+    profile: targets.profile,
+    browserRoot: targets.browserRoot,
+    folder: targets.folder,
+    folderPath: targets.folderPath,
     includeEmptyFolders: Boolean(flags.includeEmptyFolders),
     remoteKey: flags.remote,
     dryRun: true,
@@ -554,11 +555,11 @@ async function commandSyncSetup(flags) {
   });
   const syncConfigPath = getDefaultSyncConfigPath(process.env);
   const saved = await saveSyncConfig({
-    browser: flags.browser,
-    profile: flags.profile,
-    browserRoot: expandUserPath(flags.browserRoot),
-    folder: flags.folder,
-    folderPath: flags.folderPath,
+    browser: targets.browser,
+    profile: targets.profile,
+    browserRoot: targets.browserRoot,
+    folder: targets.folder,
+    folderPath: targets.folderPath,
     includeEmptyFolders: Boolean(flags.includeEmptyFolders),
     mode: flags.mode ?? "merge",
     remoteKey: preview.remoteKey
@@ -764,14 +765,14 @@ async function commandSyncPull(flags) {
 async function commandSyncPushBrowser(flags) {
   const usage = "Usage: markbridge sync push-browser --browser chrome --profile <profile> [--remote <object-key>] [--folder name|path] [--folder-path path] [--dry-run] [--force]";
 
-  if (!flags.browser || !flags.profile) {
-    throw new Error(usage);
-  }
-
   if (flags.remote === true || flags.folder === true || flags.folderPath === true) {
     throw new Error(usage);
   }
 
+  const targets = await resolveCliBrowserTargets(flags, {
+    usage,
+    promptFolder: false
+  });
   const env = await loadEnvironmentForCli(flags);
   const config = loadCosConfig(env);
   let result;
@@ -779,11 +780,11 @@ async function commandSyncPushBrowser(flags) {
   try {
     result = await syncPushBrowserToCloud({
       config,
-      browser: flags.browser,
-      profile: flags.profile,
-      browserRoot: expandUserPath(flags.browserRoot),
-      folder: flags.folder,
-      folderPath: flags.folderPath,
+      browser: targets.browser,
+      profile: targets.profile,
+      browserRoot: targets.browserRoot,
+      folder: targets.folder,
+      folderPath: targets.folderPath,
       includeEmptyFolders: Boolean(flags.includeEmptyFolders),
       remoteKey: flags.remote,
       dryRun: Boolean(flags.dryRun),
@@ -1394,6 +1395,28 @@ async function persistPulledRemoteEtag({ config, syncConfig, syncConfigPath, rem
   }
 }
 
+function cliPromptOptions(flags) {
+  return {
+    json: flags.json,
+    noInteractive: flags.noInteractive,
+    flags,
+    env: process.env,
+    stdin: process.stdin,
+    stdout: process.stdout
+  };
+}
+
+async function resolveCliBrowserTargets(flags, options = {}) {
+  return resolveBrowserProfileFolder({
+    ...flags,
+    browserRoot: expandUserPath(flags.browserRoot)
+  }, {
+    ...cliPromptOptions(flags),
+    usage: options.usage,
+    promptFolder: options.promptFolder
+  });
+}
+
 function expandUserPath(value) {
   if (!value) {
     return value;
@@ -1959,13 +1982,13 @@ function printHelp() {
   console.log(`MarkBridge
 
 Usage:
-  markbridge export-browser --browser chrome|edge --profile <profile> --output <output.html> [--folder name|path] [--folder-path path] [--dry-run]
+  markbridge export-browser [--browser chrome|edge] [--profile <profile>] --output <output.html> [--folder name|path] [--folder-path path] [--dry-run] [--no-interactive]
   markbridge import-browser --input <bookmarks.html> --browser chrome|edge --profile <profile> [--folder MarkBridge] [--mode merge|replace-folder|append] [--quit-browser] [--reopen] [--dry-run]
   markbridge cloud push --file <local-file> --remote <object-key>
   markbridge cloud pull --remote <object-key> --output <local-file>
   markbridge cloud list [--prefix prefix] [--max-keys n]
   markbridge cloud delete --remote <object-key>
-  markbridge sync setup --browser chrome|edge --profile <profile> [--folder name|path] [--folder-path path] [--mode merge|replace-folder|append] [--remote <object-key>]
+  markbridge sync setup [--browser chrome|edge] [--profile <profile>] [--folder name|path] [--folder-path path] [--mode merge|replace-folder|append] [--remote <object-key>] [--no-interactive]
   markbridge sync status
   markbridge sync status --remote
   markbridge sync check
@@ -1973,7 +1996,7 @@ Usage:
   markbridge sync push [--dry-run] [--force]
   markbridge sync pull --dry-run
   markbridge sync pull --apply [--quit-browser] [--reopen]
-  markbridge sync push-browser --browser chrome|edge --profile <profile> [--remote <object-key>] [--folder name|path] [--folder-path path] [--dry-run] [--force]
+  markbridge sync push-browser [--browser chrome|edge] [--profile <profile>] [--remote <object-key>] [--folder name|path] [--folder-path path] [--dry-run] [--force] [--no-interactive]
   markbridge sync pull-browser [--remote <object-key>] --browser chrome|edge --profile <profile> [--folder MarkBridge] [--mode merge|replace-folder|append] [--dry-run] [--quit-browser] [--reopen]
   markbridge import <bookmarks.html> [--mode merge|append|replace] [--dry-run] [--library path]
   markbridge list [--json]
@@ -1993,6 +2016,8 @@ Storage:
   Default library: ~/.markbridge/library.json
   Default sync config: ~/.markbridge/sync-config.json
   Override with MARKBRIDGE_HOME or --library.
+
+On a TTY, sync setup / export-browser / sync push-browser can prompt for missing browser, profile, and folder. --json, --no-interactive, pipes, and MARKBRIDGE_NO_INTERACTIVE=1 never prompt.
 
 sync push detects COS ETag conflicts and refuses to overwrite unless the last ETag matches or you pass --force.
 
