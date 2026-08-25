@@ -75,6 +75,36 @@ test("pushLibraryToBrowser can quit a running browser, push bookmarks, and reope
   }
 });
 
+test("pushLibraryToBrowser attaches backupPath when a later step fails", async () => {
+  const { home, browserRoot, cleanup } = await createTestProfile();
+  const library = await createDemoLibrary();
+
+  try {
+    await assert.rejects(
+      () => pushLibraryToBrowser(library, {
+        browser: "chrome",
+        profile: "Default",
+        browserRoot,
+        env: { MARKBRIDGE_HOME: home },
+        skipRunningCheck: true,
+        reopen: true,
+        reopenBrowserAction: () => {
+          throw new Error("reopen failed");
+        }
+      }),
+      (error) => {
+        assert.equal(error.message, "reopen failed");
+        assert.equal(error.browser, "chrome");
+        assert.equal(error.profile, "Default");
+        assert.equal(existsSync(error.backupPath), true);
+        return true;
+      }
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
 test("previewLibraryToBrowser reports merge duplicates without writing bookmarks", async () => {
   const { home, browserRoot, bookmarksPath, cleanup } = await createTestProfile();
   const library = await createDemoLibrary();

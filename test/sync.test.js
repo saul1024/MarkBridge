@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { createDefaultRemoteKey, detectPushConflict, getDefaultSyncConfigPath, getSyncRemoteStatus, loadSyncConfig, saveSyncConfig, syncPullCloudToBrowser, syncPushBrowserToCloud } from "../src/index.js";
+import { createDefaultRemoteKey, detectPullRemoteChange, detectPushConflict, getDefaultSyncConfigPath, getSyncRemoteStatus, loadSyncConfig, saveSyncConfig, syncPullCloudToBrowser, syncPushBrowserToCloud } from "../src/index.js";
 
 test("createDefaultRemoteKey creates stable readable object keys", () => {
   assert.equal(
@@ -241,6 +241,221 @@ test("syncPullCloudToBrowser previews and merges COS HTML without duplicate brow
   }
 });
 
+test("detectPullRemoteChange classifies missing, new, unchanged, and changed remotes", () => {
+  assert.deepEqual(detectPullRemoteChange({
+    remote: { exists: false },
+    expectedEtag: undefined
+  }), {
+    remoteExists: false,
+    remoteEtag: null,
+    expectedEtag: null,
+    remoteChanged: false,
+    remoteUnchanged: false,
+    remoteStatus: "missing"
+  });
+
+  assert.deepEqual(detectPullRemoteChange({
+    remote: { exists: true, etag: "\"abc\"" },
+    expectedEtag: undefined
+  }), {
+    remoteExists: true,
+    remoteEtag: "\"abc\"",
+    expectedEtag: null,
+    remoteChanged: true,
+    remoteUnchanged: false,
+    remoteStatus: "new-to-us"
+  });
+
+  assert.deepEqual(detectPullRemoteChange({
+    remote: { exists: true, etag: "\"abc\"" },
+    expectedEtag: "abc"
+  }), {
+    remoteExists: true,
+    remoteEtag: "\"abc\"",
+    expectedEtag: "abc",
+    remoteChanged: false,
+    remoteUnchanged: true,
+    remoteStatus: "unchanged"
+  });
+
+  assert.deepEqual(detectPullRemoteChange({
+    remote: { exists: true, etag: "\"new\"" },
+    expectedEtag: "\"old\""
+  }), {
+    remoteExists: true,
+    remoteEtag: "\"new\"",
+    expectedEtag: "old",
+    remoteChanged: true,
+    remoteUnchanged: false,
+    remoteStatus: "changed"
+  });
+});
+
+test("syncPullCloudToBrowser reports new-to-us when no expectedEtag and still imports", async () => {
+  const { browserRoot, bookmarksPath, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    uploaded.set("books.html", {
+      body: Buffer.from(createBooksHtml(), "utf8"),
+      contentType: "text/html; charset=utf-8",
+      etag: "\"first-etag\""
+    });
+
+    const result = await syncPullCloudToBrowser({
+      client,
+      remoteKey: "books.html",
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "ImportedBooks",
+      mode: "merge",
+      skipRunningCheck: true
+    });
+
+    assert.equal(result.remoteExists, true);
+    assert.equal(result.remoteEtag, "\"first-etag\"");
+    assert.equal(result.expectedEtag, null);
+    assert.equal(result.remoteChanged, true);
+    assert.equal(result.remoteUnchanged, false);
+    assert.equal(result.remoteStatus, "new-to-us");
+    assert.equal(result.pushed, 2);
+    assert.match(await readFile(bookmarksPath, "utf8"), /ImportedBooks/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPullCloudToBrowser reports unchanged when expectedEtag matches and still imports", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    uploaded.set("books.html", {
+      body: Buffer.from(createBooksHtml(), "utf8"),
+      contentType: "text/html; charset=utf-8",
+      etag: "\"first-etag\""
+    });
+
+    const result = await syncPullCloudToBrowser({
+      client,
+      remoteKey: "books.html",
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "ImportedBooks",
+      mode: "merge",
+      expectedEtag: "first-etag",
+      skipRunningCheck: true
+    });
+
+    assert.equal(result.remoteExists, true);
+    assert.equal(result.remoteEtag, "\"first-etag\"");
+    assert.equal(result.expectedEtag, "first-etag");
+    assert.equal(result.remoteChanged, false);
+    assert.equal(result.remoteUnchanged, true);
+    assert.equal(result.remoteStatus, "unchanged");
+    assert.equal(result.pushed, 2);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPullCloudToBrowser reports changed after remote body and etag change", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    uploaded.set("books.html", {
+      body: Buffer.from(createBooksHtml(), "utf8"),
+      contentType: "text/html; charset=utf-8",
+      etag: "\"first-etag\""
+    });
+
+    const first = await syncPullCloudToBrowser({
+      client,
+      remoteKey: "books.html",
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "ImportedBooks",
+      mode: "merge",
+      skipRunningCheck: true
+    });
+
+    assert.equal(first.remoteStatus, "new-to-us");
+    assert.equal(first.pushed, 2);
+
+    uploaded.set("books.html", {
+      body: Buffer.from(createBooksHtml().replace(
+        '        <DT><A HREF="https://sqlite.org/docs.html">SQLite Notes</A>',
+        '        <DT><A HREF="https://sqlite.org/docs.html">SQLite Notes</A>\n        <DT><A HREF="https://example.com/new">New Link</A>'
+      ), "utf8"),
+      contentType: "text/html; charset=utf-8",
+      etag: "\"second-etag\""
+    });
+
+    const second = await syncPullCloudToBrowser({
+      client,
+      remoteKey: "books.html",
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "ImportedBooks",
+      mode: "merge",
+      expectedEtag: first.remoteEtag,
+      skipRunningCheck: true
+    });
+
+    assert.equal(second.remoteExists, true);
+    assert.equal(second.remoteEtag, "\"second-etag\"");
+    assert.equal(second.expectedEtag, "first-etag");
+    assert.equal(second.remoteChanged, true);
+    assert.equal(second.remoteUnchanged, false);
+    assert.equal(second.remoteStatus, "changed");
+    assert.equal(second.imported.bookmarks, 3);
+    assert.equal(second.pushed, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPullCloudToBrowser ignores expectedEtag when expectedRemoteKey differs", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    uploaded.set("books.html", {
+      body: Buffer.from(createBooksHtml(), "utf8"),
+      contentType: "text/html; charset=utf-8",
+      etag: "\"first-etag\""
+    });
+
+    const result = await syncPullCloudToBrowser({
+      client,
+      remoteKey: "books.html",
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "ImportedBooks",
+      mode: "merge",
+      expectedEtag: "first-etag",
+      expectedRemoteKey: "other-key.html",
+      skipRunningCheck: true
+    });
+
+    assert.equal(result.expectedEtag, null);
+    assert.equal(result.remoteChanged, true);
+    assert.equal(result.remoteStatus, "new-to-us");
+    assert.equal(result.pushed, 2);
+  } finally {
+    await cleanup();
+  }
+});
 
 test("detectPushConflict allows first upload, matching etag, and force", () => {
   assert.deepEqual(detectPushConflict({

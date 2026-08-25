@@ -712,22 +712,25 @@ async function commandSyncPull(flags) {
 
   try {
     result = await syncPullCloudToBrowser({
-    config,
-    remoteKey: options.remoteKey,
-    browser: options.browser,
-    profile: options.profile,
-    browserRoot: expandUserPath(options.browserRoot),
-    folder: options.folder,
-    mode: options.mode,
-    dryRun: Boolean(flags.dryRun),
-    quitBrowser: Boolean(flags.quitBrowser),
-    reopen: Boolean(flags.reopen),
-    skipRunningCheck: Boolean(flags.skipRunningCheck),
-    retryHint: buildRetryCommand("sync pull", flags, { apply: true, quitBrowser: true, reopen: true, dryRun: false }),
-    env: process.env
+      config,
+      remoteKey: options.remoteKey,
+      browser: options.browser,
+      profile: options.profile,
+      browserRoot: expandUserPath(options.browserRoot),
+      folder: options.folder,
+      mode: options.mode,
+      dryRun: Boolean(flags.dryRun),
+      quitBrowser: Boolean(flags.quitBrowser),
+      reopen: Boolean(flags.reopen),
+      skipRunningCheck: Boolean(flags.skipRunningCheck),
+      retryHint: buildRetryCommand("sync pull", flags, { apply: true, quitBrowser: true, reopen: true, dryRun: false }),
+      expectedEtag: syncConfig.lastRemoteEtag,
+      expectedRemoteKey: syncConfig.lastRemoteKey,
+      env: process.env
     });
   } catch (error) {
     throwFriendlyRemoteNotFound(error, options.remoteKey, "markbridge sync push");
+    throwFriendlyBrowserWriteFailed(error);
     throw error;
   }
 
@@ -823,22 +826,23 @@ async function commandSyncPullBrowser(flags) {
 
   try {
     result = await syncPullCloudToBrowser({
-    config,
-    remoteKey: flags.remote,
-    browser: flags.browser,
-    profile: flags.profile,
-    browserRoot: expandUserPath(flags.browserRoot),
-    folder: flags.folder,
-    mode: flags.mode,
-    dryRun: Boolean(flags.dryRun),
-    quitBrowser: Boolean(flags.quitBrowser),
-    reopen: Boolean(flags.reopen),
-    skipRunningCheck: Boolean(flags.skipRunningCheck),
-    retryHint: buildRetryCommand("sync pull-browser", flags, { quitBrowser: true, reopen: true, dryRun: false }),
-    env: process.env
+      config,
+      remoteKey: flags.remote,
+      browser: flags.browser,
+      profile: flags.profile,
+      browserRoot: expandUserPath(flags.browserRoot),
+      folder: flags.folder,
+      mode: flags.mode,
+      dryRun: Boolean(flags.dryRun),
+      quitBrowser: Boolean(flags.quitBrowser),
+      reopen: Boolean(flags.reopen),
+      skipRunningCheck: Boolean(flags.skipRunningCheck),
+      retryHint: buildRetryCommand("sync pull-browser", flags, { quitBrowser: true, reopen: true, dryRun: false }),
+      env: process.env
     });
   } catch (error) {
     throwFriendlyRemoteNotFound(error, flags.remote, "markbridge sync push-browser --browser <browser> --profile <profile> --folder <folder>");
+    throwFriendlyBrowserWriteFailed(error);
     throw error;
   }
 
@@ -1343,6 +1347,32 @@ function throwFriendlySyncConflict(error) {
   ].join("\n"));
 }
 
+function throwFriendlyBrowserWriteFailed(error) {
+  if (!error?.backupPath) {
+    return;
+  }
+
+  const lines = [
+    "Write failed."
+  ];
+
+  if (error.message && error.message !== "Write failed.") {
+    lines.push(error.message);
+  }
+
+  lines.push(`Backup: ${error.backupPath}`);
+
+  if (error.browser && error.profile) {
+    lines.push(`Restore: ${buildRestoreCommand({
+      browser: error.browser,
+      profile: error.profile,
+      backupPath: error.backupPath
+    })}`);
+  }
+
+  throw new Error(lines.join("\n"));
+}
+
 async function persistPulledRemoteEtag({ config, syncConfig, syncConfigPath, remoteKey }) {
   try {
     const remote = await getSyncRemoteStatus({
@@ -1790,6 +1820,7 @@ function formatSyncPullBrowserDryRunResult(result) {
     `Bucket: ${result.bucket}`,
     `Remote: ${result.remoteKey}`,
     `Downloaded size: ${result.size} bytes`,
+    ...formatSyncPullRemoteStatusLines(result),
     `Target: ${result.browserName} / ${result.profileName} (${result.profile})`,
     `Mode: ${result.mode}`,
     `Target folder: Bookmarks Bar / ${result.folder}`,
@@ -1810,6 +1841,7 @@ function formatSyncPullBrowserResult(result) {
     `Bucket: ${result.bucket}`,
     `Remote: ${result.remoteKey}`,
     `Downloaded size: ${result.size} bytes`,
+    ...formatSyncPullRemoteStatusLines(result),
     `Target: ${result.browserName} / ${result.profileName} (${result.profile})`,
     `Mode: ${result.mode}`,
     `Bookmarks imported: ${result.imported.bookmarks}`,
@@ -1845,6 +1877,44 @@ function formatSyncPullBrowserResult(result) {
   }
 
   return output.join("\n");
+}
+
+function formatSyncPullRemoteStatusLines(result) {
+  const lines = [
+    `Remote ETag: ${result.remoteEtag || "(none)"}`,
+    `Last seen ETag: ${result.expectedEtag || "(none)"}`,
+    `Remote since last sync: ${describeRemoteSinceLastSync(result)}`
+  ];
+
+  if (result.remoteUnchanged && result.dryRun) {
+    lines.push("Remote matches last pull/push; apply would still merge into the browser.");
+  }
+
+  if (result.remoteStatus === "changed") {
+    lines.push("Remote object changed since last recorded ETag.");
+  }
+
+  return lines;
+}
+
+function describeRemoteSinceLastSync(result) {
+  if (result.remoteStatus === "unchanged") {
+    return "unchanged";
+  }
+
+  if (result.remoteStatus === "changed") {
+    return "changed";
+  }
+
+  if (result.remoteStatus === "new-to-us") {
+    return "first time seeing this object";
+  }
+
+  if (result.remoteStatus === "missing") {
+    return "missing";
+  }
+
+  return result.remoteStatus || "(unknown)";
 }
 
 function describeFolderAction(summary) {

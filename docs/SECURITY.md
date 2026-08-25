@@ -12,7 +12,7 @@ MarkBridge 当前不是加密保险箱：
 - COS 上存放的是明文 HTML 快照（文件夹导出结果），不是加密对象。
 - 不做端到端加密。
 
-当前已支持腾讯云 COS 上传 / 下载 / 列表 / 删除，以及基于默认配置的 `sync push` / `sync pull`。同步对象是浏览器指定文件夹的 HTML，不是完整 `library.json`。`sync push` 已用 ETag 做覆盖门禁，默认拒绝覆盖已变化的远端对象；`--force` 仍可强制覆盖。
+当前已支持腾讯云 COS 上传 / 下载 / 列表 / 删除，以及基于默认配置的 `sync push` / `sync pull`。同步对象是浏览器指定文件夹的 HTML，不是完整 `library.json`。`sync push` 已用 ETag 做覆盖门禁，默认拒绝覆盖已变化的远端对象；`--force` 仍可强制覆盖。`sync pull` 会提示远端相对本机 `lastRemoteEtag` 是否变化，但不因此拒绝拉取；写入浏览器失败且已创建备份时，会给出 Backup 路径和 restore 命令。
 
 ## 2. 当前可控点
 
@@ -23,7 +23,8 @@ MarkBridge 当前不是加密保险箱：
 - 用独立 Profile 接收 MarkBridge 投递结果。
 - 写入浏览器前自动备份，便于恢复。
 - 使用 `export-browser` / `import-browser` 缩短操作链路，减少误选本地库的风险。
-- 使用 `sync pull --dry-run` 先预览再 `--apply`，降低误写浏览器的风险。
+- 使用 `sync pull --dry-run` 先预览再 `--apply`，降低误写浏览器的风险。dry-run 会说明远端相对上次同步是未变化、已变化还是首次见到。
+- 写入浏览器失败时，按输出的 Backup / Restore 命令回滚，而不是再拉一次远端。
 
 ## 3. COS 与凭据
 
@@ -40,6 +41,7 @@ MarkBridge 当前不是加密保险箱：
 - 如果用户把敏感书签写入 Chrome / Edge，浏览器同步、地址栏补全、历史记录仍可能暴露。
 - 如果目标 Profile 开启浏览器云同步，MarkBridge 写入的书签可能被浏览器账号同步。
 - 即使有 ETag 门禁，`--force` 仍会覆盖同 key 的远端 HTML；多设备不要同时强推。
+- `sync pull` 的 ETag 比较只是提示：远端未变化时 `--apply` 仍会按 merge 写入浏览器；不要把它理解成自动跳过或自动合并。
 
 ## 5. 当前建议
 
@@ -57,7 +59,7 @@ MarkBridge 当前不是加密保险箱：
 
 - 本地库加密。
 - COS 同步 / 对象加密。
-- 书签内容自动合并、版本历史，以及更细的冲突策略（当前仅有 ETag 覆盖门禁，`--force` 仍可覆盖）。
+- 书签内容自动合并、版本历史，以及更细的冲突策略（当前 push 侧有 ETag 覆盖门禁，pull 侧仅提示变化，`--force` 仍可覆盖远端）。
 - 打开书签时使用指定浏览器 Profile。
 - 无痕打开。
 - 图形界面中的会议模式。
