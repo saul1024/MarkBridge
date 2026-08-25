@@ -170,6 +170,54 @@ test("CLI export-browser exports a selected browser profile folder without writi
   }
 });
 
+test("CLI sync setup without flags throws usage when stdin is not a TTY", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-setup-nontty-"));
+  const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
+
+  try {
+    const result = await execFileAsync(process.execPath, [CLI_PATH, "sync", "setup"], { env })
+      .then(() => ({ code: 0, stderr: "" }))
+      .catch((error) => ({ code: error.code, stderr: error.stderr }));
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Usage: markbridge sync setup --browser chrome --profile <profile>/);
+  } finally {
+    await rm(markbridgeHome, { recursive: true, force: true });
+  }
+});
+
+test("CLI sync setup --json without flags never prompts and throws usage", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-setup-json-"));
+  const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
+
+  try {
+    const result = await execFileAsync(process.execPath, [CLI_PATH, "sync", "setup", "--json"], { env })
+      .then(() => ({ code: 0, stderr: "" }))
+      .catch((error) => ({ code: error.code, stderr: error.stderr }));
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Usage: markbridge sync setup --browser chrome --profile <profile>/);
+  } finally {
+    await rm(markbridgeHome, { recursive: true, force: true });
+  }
+});
+
+test("CLI export-browser without required flags throws usage when not interactive", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-export-nontty-"));
+  const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };
+
+  try {
+    const result = await execFileAsync(process.execPath, [CLI_PATH, "export-browser", "--output", join(markbridgeHome, "out.html")], { env })
+      .then(() => ({ code: 0, stderr: "" }))
+      .catch((error) => ({ code: error.code, stderr: error.stderr }));
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Usage: markbridge export-browser --browser chrome --profile <profile>/);
+  } finally {
+    await rm(markbridgeHome, { recursive: true, force: true });
+  }
+});
+
 test("CLI sync push-browser dry-run exports selected browser folder without uploading", async () => {
   const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-push-"));
   const mockCos = await startMockCosServer();

@@ -16,6 +16,7 @@ MarkBridge 是一个面向跨浏览器、跨 Profile 书签迁移的 CLI。它�
 - MarkBridge 本地库重复导入控制：`merge`、`append`、`replace`。
 - `--dry-run` 预览导入、拉取和一键工作流结果，不写目标文件。
 - 写浏览器前自动备份，并支持列出和恢复备份。
+- 在 TTY 终端运行 `sync setup` / `export-browser` / `sync push-browser` 时，可用编号列表选择浏览器、Profile 和文件夹；显式 flags 仍然有效。
 - 保存默认同步配置后，用短命令完成日常 COS 上传、预览拉取和正式导入。
 - 一条命令将浏览器指定书签目录同步上传到腾讯云 COS。
 - 一条命令从腾讯云 COS 拉取 HTML 并预览或导入指定浏览器 Profile。
@@ -207,7 +208,15 @@ fixtures/demo-bookmarks.html
 markbridge browser profiles --browser chrome
 ```
 
-假设你要同步 `Huu Quang` Profile 下的 `Books` 目录，第一次只需要配置一次：
+在真实终端（stdin/stdout 是 TTY）里也可以直接运行：
+
+```sh
+markbridge sync setup
+```
+
+会列出浏览器、Profile 和书签目录供编号选择，选中的文件夹会保存为精确 `--folder-path`。`--json`、管道和非交互环境仍要求显式参数；`--no-interactive` 或 `MARKBRIDGE_NO_INTERACTIVE=1` 可关闭选择器。`sync push` / `sync pull` 在已有 sync-config 时不会再提示。
+
+也可以继续手写 flags。假设你要同步 `Huu Quang` Profile 下的 `Books` 目录，第一次只需要配置一次：
 
 ```sh
 markbridge sync setup --browser chrome --profile "Huu Quang" --folder "Books" --mode merge
@@ -381,11 +390,13 @@ markbridge sync setup --browser chrome --profile "Huu Quang" --folder "Books"
 markbridge sync setup --browser chrome --profile "Huu Quang" --folder-path "书签栏 / Books"
 ```
 
+在 TTY 里，`sync setup` / `export-browser` 遇到歧义 `--folder` 时会列出匹配路径让你选，不必先手写 `--folder-path`。非 TTY 和 `--json` 仍报错。
+
 ## 命令总览
 
 ### export-browser
 
-从指定 Chrome / Edge Profile 直接导出 HTML。这个命令会在内存里完成 `pull-browser -> export`，不会写入 MarkBridge 本地库。
+从指定 Chrome / Edge Profile 直接导出 HTML。这个命令会在内存里完成 `pull-browser -> export`，不会写入 MarkBridge 本地库。TTY 下可省略 `--browser` / `--profile` / `--folder`，用编号列表选择；`--output` 仍需要。`--json` 不会进入选择器。
 
 ```sh
 markbridge export-browser --browser chrome --profile "Huu Quang" --output ~/Desktop/bookmarks.html
@@ -402,8 +413,9 @@ markbridge export-browser --browser chrome --profile "Huu Quang" --folder-path "
 - `--folder-path <path>`：只导出某个完整路径文件夹。
 - `--include-empty-folders`：导出空文件夹。
 - `--dry-run`：只预览来源 Profile、命中文件夹和输出路径，不写 HTML。
+- `--no-interactive`：关闭 TTY 编号选择器，缺失参数时直接报 usage。
 - `--browser-root <path>`：高级参数，用于测试或自定义 Profile 根目录。
-- `--json`：输出 JSON。
+- `--json`：输出 JSON；JSON 模式从不提示。
 
 ### import-browser
 
@@ -435,7 +447,7 @@ markbridge import-browser --input ~/Desktop/books.html --browser chrome --profil
 
 `sync` 是跨设备最推荐的主流程。它把浏览器和 COS 串起来，不需要你手动管理中间 HTML 文件。
 
-第一次使用先保存默认配置：
+第一次使用先保存默认配置。TTY 下可以直接 `markbridge sync setup` 选择浏览器、Profile 和文件夹；也可以继续手写 flags：
 
 ```sh
 markbridge sync setup --browser chrome --profile "Huu Quang" --folder "Books" --mode merge
@@ -461,7 +473,7 @@ markbridge sync pull --apply --quit-browser --reopen
 
 这四条命令的含义：
 
-- `sync setup`：保存默认浏览器、Profile、书签目录、导入模式和 COS 对象 key。它只做本地预览校验，不上传 COS。
+- `sync setup`：保存默认浏览器、Profile、书签目录、导入模式和 COS 对象 key。它只做本地预览校验，不上传 COS。TTY 下可交互选择；选中文件夹会写成精确 `folderPath`。
 - `sync push`：按保存的配置，从浏览器指定书签目录导出 HTML 并上传到 COS。远端对象已变化且本机记录的 ETag 不匹配时拒绝覆盖，可用 `--force` 强制覆盖。
 - `sync pull --dry-run`：按保存的配置，从 COS 下载 HTML 到内存并预览会新增、创建、跳过多少书签，同时显示远端 ETag 相对上次同步是未变化、已变化还是首次见到；不写浏览器。远端未变化时 apply 仍会按 merge 写入。
 - `sync pull --apply`：按保存的配置，把 COS 中的书签正式导入浏览器。正式写浏览器时建议加 `--quit-browser --reopen`。成功或失败都会尽量给出 Backup / Restore；失败不会更新 `lastRemoteEtag`。
@@ -514,10 +526,11 @@ markbridge sync pull-browser --browser chrome --profile "Huu Quang" --folder "Bo
 
 参数：
 
-- `sync setup --browser chrome|edge`：来源和目标浏览器。
-- `sync setup --profile <profile>`：来源和目标 Profile，可以填 Profile 目录名或显示名，只要能唯一匹配。
+- `sync setup --browser chrome|edge`：来源和目标浏览器。TTY 下可省略，从本机已有 Chrome / Edge Profile 里选；只有一个浏览器时自动选中。
+- `sync setup --profile <profile>`：来源和目标 Profile，可以填 Profile 目录名或显示名，只要能唯一匹配。TTY 下可省略并从列表选择。
 - `sync setup --folder <name|path>`：要同步的书签文件夹，也是默认导入到浏览器书签栏下的目标文件夹名。
-- `sync setup --folder-path <path>`：用完整路径指定来源文件夹。
+- `sync setup --folder-path <path>`：用完整路径指定来源文件夹。TTY 下若两者都省略，会列出目录并提供 `all bookmarks`（不加文件夹过滤）；选中后保存精确路径。
+- `sync setup --no-interactive`：关闭选择器。`MARKBRIDGE_NO_INTERACTIVE=1` 效果相同。
 - `sync setup --mode merge`：默认导入模式，合并并跳过重复 URL。
 - `sync setup --mode replace-folder`：正式 pull 时替换目标文件夹，不影响其他文件夹。
 - `sync setup --remote <object-key>`：手动指定 COS 对象 key。省略时自动生成并保存。
@@ -1069,7 +1082,7 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js
 当前通过：
 
 ```text
-npm test: 49 tests passed
+npm test: 75 tests passed
 npm run acceptance: passed
 node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 ```
@@ -1091,6 +1104,7 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 - COS 请求签名、上传、下载、列表解析。
 - COS HEAD 元信息查询和 404 结构化识别。
 - `sync setup` 默认同步配置读写，不保存 COS 密钥。
+- TTY 编号选择器：`sync setup` / `export-browser` / `sync push-browser` 补齐 browser/profile/folder；`--json` 和非 TTY 保持原 usage 错误。
 - `sync check` 健康检查和失败下一步提示。
 - `sync status --remote` 远端对象状态查询。
 - `sync verify` 安全端到端验证，不写浏览器。
@@ -1102,7 +1116,7 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 
 ## 当前限制
 
-- 不做图形界面。
+- 不做图形界面，也不引入 TUI 库；TTY 下只有编号列表选择器。
 - 不做浏览器扩展。
 - 不做本地加密。
 - COS 当前支持手动上传、下载、列表、删除，以及默认配置后的 `sync push` / `sync pull` 工作流。`sync push` 已做 ETag 冲突检测，默认拒绝覆盖，`--force` 可强制覆盖；`sync pull` 会提示远端是否变化但不阻断。不做自动双向合并，也不做 `library.json` 级同步或版本历史。
