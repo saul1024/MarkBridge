@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MarkBridge 本机网页</title>
+  <title>MarkBridge</title>
   <meta name="robots" content="noindex, nofollow">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cpath d='M10 8h12v16l-6-3.5L10 24V8z' fill='%23fffdf8'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/styles.css">
@@ -21,26 +21,12 @@
   </header>
 
   <main>
-    <section class="card" id="local">
-      <p class="section-kicker">1</p>
-      <h2>本机说明</h2>
-      <p>这是跑在你这台电脑上的网页，不是云应用。书签文件、Chrome / Edge Profile 都留在运行 <code>markbridge web</code> 的机器上。</p>
-      <ul class="facts">
-        <li>只监听 <strong>127.0.0.1</strong>，局域网和公网访问不到。</li>
-        <li>COS 密钥来自当前目录的 <code>.env</code> 或环境变量，不会下发到浏览器。</li>
-        <li>必须在<strong>有 Chrome / Edge 用户数据</strong>的那台电脑上启动。换一台机器就看不到这边的 Profile。</li>
-        <li>写入浏览器会改本机 <code>Bookmarks</code> 文件。所有写操作都先预览，再点「执行」。</li>
-      </ul>
-    </section>
-
     <section class="card" id="copy">
-      <p class="section-kicker">2</p>
       <h2>跨 Profile 复制</h2>
-      <p class="lede">把一个 Chrome / Edge 账号里的书签夹复制到另一个账号。这是主场景：不经过 COS，也不改云端。</p>
 
       <div class="grid">
         <fieldset>
-          <legend>源账号</legend>
+          <legend>从</legend>
           <label>浏览器
             <select id="fromBrowser"></select>
           </label>
@@ -53,7 +39,7 @@
         </fieldset>
 
         <fieldset>
-          <legend>目标账号</legend>
+          <legend>到</legend>
           <label>浏览器
             <select id="toBrowser"></select>
           </label>
@@ -65,30 +51,27 @@
           </label>
           <label>模式
             <select id="copyMode">
-              <option value="merge">merge · 合并去重</option>
-              <option value="replace-folder">replace-folder · 替换该文件夹</option>
-              <option value="append">append · 追加</option>
+              <option value="merge">合并去重</option>
+              <option value="replace-folder">替换该文件夹</option>
+              <option value="append">追加</option>
             </select>
           </label>
         </fieldset>
       </div>
 
-      <p class="warn">写入前请先退出目标浏览器。Chrome / Edge 若仍在运行，可能把刚写入的 Bookmarks 文件盖回去。</p>
       <label class="check">
         <input id="copyQuit" type="checkbox">
-        执行时退出目标浏览器（推荐）
+        执行时退出目标浏览器
       </label>
 
       <div class="actions">
-        <button type="button" class="primary" id="copyPreviewBtn">预览复制</button>
-        <button type="button" class="danger" id="copyApplyBtn" disabled>执行复制</button>
+        <button type="button" class="primary" id="copyPreviewBtn">预览</button>
+        <button type="button" class="danger" id="copyApplyBtn" disabled>执行</button>
       </div>
     </section>
 
     <section class="card" id="sync">
-      <p class="section-kicker">3</p>
       <h2>COS 同步</h2>
-      <p class="lede">把当前选中的源 Profile / 文件夹保存为默认同步，再预览或执行 push / pull。密钥仍只在本机进程里读取。</p>
 
       <dl class="status-dl" id="syncStatusDl">
         <div><dt>Setup</dt><dd id="syncSetupState">读取中…</dd></div>
@@ -104,30 +87,28 @@
       <div class="split">
         <div>
           <h3>Push 到 COS</h3>
-          <p class="hint">先预览。若远端 ETag 已变化，必须勾选 force 才能覆盖。</p>
           <label class="check hidden" id="forceWrap">
             <input id="syncForce" type="checkbox">
             强制覆盖远端（force）
           </label>
           <div class="actions">
-            <button type="button" class="primary" id="pushPreviewBtn">预览 Push</button>
-            <button type="button" class="danger" id="pushApplyBtn" disabled>执行 Push</button>
+            <button type="button" class="primary" id="pushPreviewBtn">预览</button>
+            <button type="button" class="danger" id="pushApplyBtn" disabled>执行</button>
           </div>
         </div>
         <div>
           <h3>Pull 到浏览器</h3>
-          <p class="hint">预览只读；执行会写目标 Profile 的 Bookmarks 文件。</p>
           <label class="check">
             <input id="pullQuit" type="checkbox">
-            执行时退出浏览器
+            执行时退出目标浏览器
           </label>
           <label class="check">
             <input id="pullReopen" type="checkbox">
             写完后重新打开书签页
           </label>
           <div class="actions">
-            <button type="button" class="primary" id="pullPreviewBtn">预览 Pull</button>
-            <button type="button" class="danger" id="pullApplyBtn" disabled>执行 Pull</button>
+            <button type="button" class="primary" id="pullPreviewBtn">预览</button>
+            <button type="button" class="danger" id="pullApplyBtn" disabled>执行</button>
           </div>
         </div>
       </div>
@@ -138,13 +119,9 @@
         <h2>状态</h2>
         <button type="button" class="ghost" id="clearLogBtn">清除</button>
       </div>
-      <pre id="statusBox" class="status-box" role="status">打开页面后会读取本机 Profile。先预览，再执行。</pre>
+      <pre id="statusBox" class="status-box" role="status"></pre>
     </section>
   </main>
-
-  <footer>
-    <p>MarkBridge 本机网页原型 · 不是 Electron，也不是浏览器扩展 · 停用：终端里 Ctrl+C</p>
-  </footer>
 
   <script src="/app.js" defer></script>
 </body>
