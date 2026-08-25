@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -170,16 +172,8 @@ test("CLI export-browser exports a selected browser profile folder without writi
 
 test("CLI sync push-browser dry-run exports selected browser folder without uploading", async () => {
   const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-push-"));
-  const env = {
-    ...process.env,
-    MARKBRIDGE_HOME: markbridgeHome,
-    SYNC_PROVIDER: "cos",
-    COS_ENDPOINT: "https://cos.ap-guangzhou.myqcloud.com",
-    COS_REGION: "ap-guangzhou",
-    COS_BUCKET: "markbridge-1250000000",
-    COS_SECRET_ID: "AKIDEXAMPLE",
-    COS_SECRET_KEY: "SECRETEXAMPLE"
-  };
+  const mockCos = await startMockCosServer();
+  const env = createCosTestEnv(markbridgeHome, mockCos);
   const { browserRoot, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFileWithAllRoots());
 
   try {
@@ -195,31 +189,27 @@ test("CLI sync push-browser dry-run exports selected browser folder without uplo
     ], env);
 
     assert.equal(result.provider, "cos");
-    assert.equal(result.bucket, "markbridge-1250000000");
+    assert.equal(result.bucket, mockCos.bucket);
     assert.equal(result.dryRun, true);
     assert.equal(result.uploaded, false);
+    assert.equal(result.conflict, false);
+    assert.equal(result.remoteExists, false);
     assert.equal(result.remoteKey, "bookmarks/chrome/Test-Person/Other-bookmarks-Nested-Other.html");
     assert.equal(result.profileName, "Test Person");
     assert.equal(result.folder.path, "Other bookmarks / Nested Other");
     assert.equal(result.exportedBookmarks, 1);
+    assert.equal(mockCos.objects.size, 0);
     assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
   } finally {
+    await mockCos.close();
     await cleanup();
   }
 });
 
 test("CLI sync push-browser dry-run text explains the action without writing COS", async () => {
   const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-push-text-"));
-  const env = {
-    ...process.env,
-    MARKBRIDGE_HOME: markbridgeHome,
-    SYNC_PROVIDER: "cos",
-    COS_ENDPOINT: "https://cos.ap-guangzhou.myqcloud.com",
-    COS_REGION: "ap-guangzhou",
-    COS_BUCKET: "markbridge-1250000000",
-    COS_SECRET_ID: "AKIDEXAMPLE",
-    COS_SECRET_KEY: "SECRETEXAMPLE"
-  };
+  const mockCos = await startMockCosServer();
+  const env = createCosTestEnv(markbridgeHome, mockCos);
   const { browserRoot, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFileWithAllRoots());
 
   try {
@@ -238,24 +228,18 @@ test("CLI sync push-browser dry-run text explains the action without writing COS
     assert.match(stdout, /Source: Google Chrome \/ Test Person \(Default\)/);
     assert.match(stdout, /Folder: Other bookmarks \/ Nested Other/);
     assert.match(stdout, /Remote: bookmarks\/chrome\/Test-Person\/Other-bookmarks-Nested-Other\.html/);
-    assert.match(stdout, /Action: would overwrite COS object/);
+    assert.match(stdout, /Action: would upload new COS object/);
+    assert.equal(mockCos.objects.size, 0);
   } finally {
+    await mockCos.close();
     await cleanup();
   }
 });
 
 test("CLI sync setup saves defaults and short push uses them", async () => {
   const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-setup-"));
-  const env = {
-    ...process.env,
-    MARKBRIDGE_HOME: markbridgeHome,
-    SYNC_PROVIDER: "cos",
-    COS_ENDPOINT: "https://cos.ap-guangzhou.myqcloud.com",
-    COS_REGION: "ap-guangzhou",
-    COS_BUCKET: "markbridge-1250000000",
-    COS_SECRET_ID: "AKIDEXAMPLE",
-    COS_SECRET_KEY: "SECRETEXAMPLE"
-  };
+  const mockCos = await startMockCosServer();
+  const env = createCosTestEnv(markbridgeHome, mockCos);
   const { browserRoot, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFileWithAllRoots());
 
   try {
@@ -271,7 +255,7 @@ test("CLI sync setup saves defaults and short push uses them", async () => {
     ], env);
 
     assert.equal(setup.provider, "cos");
-    assert.equal(setup.bucket, "markbridge-1250000000");
+    assert.equal(setup.bucket, mockCos.bucket);
     assert.equal(setup.configPath, join(markbridgeHome, "sync-config.json"));
     assert.equal(setup.config.browser, "chrome");
     assert.equal(setup.config.profile, "Default");
@@ -289,7 +273,7 @@ test("CLI sync setup saves defaults and short push uses them", async () => {
 
     const push = await runCli(["sync", "push", "--dry-run", "--json"], env);
     assert.equal(push.provider, "cos");
-    assert.equal(push.bucket, "markbridge-1250000000");
+    assert.equal(push.bucket, mockCos.bucket);
     assert.equal(push.configPath, join(markbridgeHome, "sync-config.json"));
     assert.equal(push.dryRun, true);
     assert.equal(push.uploaded, false);
@@ -297,8 +281,10 @@ test("CLI sync setup saves defaults and short push uses them", async () => {
     assert.equal(push.profileName, "Test Person");
     assert.equal(push.folder.path, "Other bookmarks / Nested Other");
     assert.equal(push.exportedBookmarks, 1);
+    assert.equal(push.conflict, false);
     assert.equal(existsSync(join(markbridgeHome, "library.json")), false);
   } finally {
+    await mockCos.close();
     await cleanup();
   }
 });
@@ -851,6 +837,96 @@ test("CLI lists browser backups and restores a selected backup", async () => {
     await cleanup();
   }
 });
+
+
+function createCosTestEnv(markbridgeHome, mockCos) {
+  return {
+    ...process.env,
+    MARKBRIDGE_HOME: markbridgeHome,
+    SYNC_PROVIDER: "cos",
+    COS_ENDPOINT: mockCos.endpoint,
+    COS_REGION: "ap-guangzhou",
+    COS_BUCKET: mockCos.bucket,
+    COS_SECRET_ID: "AKIDEXAMPLE",
+    COS_SECRET_KEY: "SECRETEXAMPLE"
+  };
+}
+
+async function startMockCosServer() {
+  const objects = new Map();
+  const server = createServer((req, res) => {
+    const url = new URL(req.url || "/", "http://127.0.0.1");
+    const key = decodeURIComponent(url.pathname.replace(/^\/+/u, ""));
+
+    if (req.method === "HEAD") {
+      const object = objects.get(key);
+
+      if (!object) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+
+      res.writeHead(200, {
+        "content-length": String(object.body.length),
+        etag: object.etag,
+        "last-modified": object.lastModified
+      });
+      res.end();
+      return;
+    }
+
+    if (req.method === "PUT") {
+      const chunks = [];
+
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        const body = Buffer.concat(chunks);
+        const etag = `"etag-${createHash("sha1").update(body).digest("hex")}"`;
+        objects.set(key, {
+          body,
+          etag,
+          lastModified: "Thu, 04 Jun 2026 00:00:00 GMT"
+        });
+        res.writeHead(200, { etag });
+        res.end();
+      });
+      return;
+    }
+
+    if (req.method === "GET") {
+      const object = objects.get(key);
+
+      if (!object) {
+        res.writeHead(404, { "content-type": "application/xml" });
+        res.end("<Error><Message>The specified key does not exist.</Message></Error>");
+        return;
+      }
+
+      res.writeHead(200, {
+        "content-length": String(object.body.length),
+        etag: object.etag
+      });
+      res.end(object.body);
+      return;
+    }
+
+    res.writeHead(405);
+    res.end();
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+
+  return {
+    objects,
+    bucket: "127.0.0.1",
+    endpoint: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    })
+  };
+}
 
 async function runCli(args, env) {
   const { stdout } = await execFileAsync(process.execPath, [CLI_PATH, ...args], { env });

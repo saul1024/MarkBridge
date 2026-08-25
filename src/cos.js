@@ -266,11 +266,13 @@ function requestHttp(request) {
   const transport = request.protocol === "http:" ? httpRequest : httpsRequest;
   const queryString = formatUrlQuery(request.query);
   const path = queryString ? `${request.path}?${queryString}` : request.path;
+  const { hostname, port } = splitHostAndPort(request.host, request.protocol);
 
   return new Promise((resolve, reject) => {
     const req = transport({
       protocol: request.protocol,
-      host: request.host,
+      hostname,
+      port,
       method: request.method,
       path,
       headers: request.headers
@@ -295,6 +297,36 @@ function requestHttp(request) {
 
     req.end();
   });
+}
+
+function splitHostAndPort(host, protocol) {
+  const defaultPort = protocol === "https:" ? 443 : 80;
+  const value = String(host ?? "");
+
+  if (value.startsWith("[")) {
+    const closing = value.indexOf("]");
+    const hostname = value.slice(1, closing);
+    const rest = value.slice(closing + 1);
+
+    return {
+      hostname,
+      port: rest.startsWith(":") ? Number(rest.slice(1)) : defaultPort
+    };
+  }
+
+  const colon = value.lastIndexOf(":");
+
+  if (colon === -1 || value.indexOf(":") !== colon) {
+    return {
+      hostname: value,
+      port: defaultPort
+    };
+  }
+
+  return {
+    hostname: value.slice(0, colon),
+    port: Number(value.slice(colon + 1)) || defaultPort
+  };
 }
 
 function buildEndpoint(config, key) {

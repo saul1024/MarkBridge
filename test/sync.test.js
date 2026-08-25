@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { createDefaultRemoteKey, getDefaultSyncConfigPath, getSyncRemoteStatus, loadSyncConfig, saveSyncConfig, syncPullCloudToBrowser, syncPushBrowserToCloud } from "../src/index.js";
+import { createDefaultRemoteKey, detectPushConflict, getDefaultSyncConfigPath, getSyncRemoteStatus, loadSyncConfig, saveSyncConfig, syncPullCloudToBrowser, syncPushBrowserToCloud } from "../src/index.js";
 
 test("createDefaultRemoteKey creates stable readable object keys", () => {
   assert.equal(
@@ -53,6 +54,37 @@ test("sync config persists browser defaults without COS secrets", async () => {
     assert.match(raw, /"format": "markbridge-sync-config"/);
     assert.doesNotMatch(raw, /COS_SECRET/);
     assert.doesNotMatch(raw, /SECRETEXAMPLE/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("saveSyncConfig persists lastRemoteEtag without COS secrets", async () => {
+  const home = await mkdtemp(join(tmpdir(), "markbridge-sync-etag-"));
+  const configPath = getDefaultSyncConfigPath({ MARKBRIDGE_HOME: home });
+
+  try {
+    await saveSyncConfig({
+      browser: "chrome",
+      profile: "Huu Quang",
+      folder: "Books",
+      mode: "merge",
+      remoteKey: "bookmarks/chrome/Huu-Quang/Books.html",
+      lastRemoteEtag: "\"etag-abc123\"",
+      lastRemoteKey: "bookmarks/chrome/Huu-Quang/Books.html",
+      COS_SECRET_ID: "AKIDEXAMPLE",
+      COS_SECRET_KEY: "SECRETEXAMPLE"
+    }, configPath);
+
+    const loaded = await loadSyncConfig(configPath);
+    const raw = await readFile(configPath, "utf8");
+
+    assert.equal(loaded.lastRemoteEtag, "\"etag-abc123\"");
+    assert.equal(loaded.lastRemoteKey, "bookmarks/chrome/Huu-Quang/Books.html");
+    assert.equal(loaded.browser, "chrome");
+    assert.doesNotMatch(raw, /COS_SECRET/);
+    assert.doesNotMatch(raw, /SECRETEXAMPLE/);
+    assert.doesNotMatch(raw, /AKIDEXAMPLE/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
@@ -209,6 +241,305 @@ test("syncPullCloudToBrowser previews and merges COS HTML without duplicate brow
   }
 });
 
+
+test("detectPushConflict allows first upload, matching etag, and force", () => {
+  assert.deepEqual(detectPushConflict({
+    remote: { exists: false },
+    expectedEtag: undefined,
+    force: false
+  }), {
+    remoteExists: false,
+    remoteEtag: null,
+    expectedEtag: null,
+    conflict: false,
+    conflictReason: null,
+    force: false
+  });
+
+  assert.equal(detectPushConflict({
+    remote: { exists: true, etag: "\"abc\"" },
+    expectedEtag: "abc",
+    force: false
+  }).conflict, false);
+
+  assert.equal(detectPushConflict({
+    remote: { exists: true, etag: "\"abc\"" },
+    expectedEtag: "\"ABC\"",
+    force: false
+  }).conflict, true);
+
+  assert.deepEqual(detectPushConflict({
+    remote: { exists: true, etag: "\"remote\"" },
+    expectedEtag: undefined,
+    force: false
+  }).conflictReason, "missing-expected-etag");
+
+  assert.deepEqual(detectPushConflict({
+    remote: { exists: true, etag: "\"new\"" },
+    expectedEtag: "old",
+    force: false
+  }).conflictReason, "etag-mismatch");
+
+  assert.equal(detectPushConflict({
+    remote: { exists: true, etag: "\"new\"" },
+    expectedEtag: "old",
+    force: true
+  }).conflict, false);
+});
+
+test("syncPushBrowserToCloud first push uploads when remote is missing", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    const result = await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html"
+    });
+
+    assert.equal(result.uploaded, true);
+    assert.equal(result.conflict, false);
+    assert.equal(result.remoteExists, false);
+    assert.equal(result.remoteKey, "books.html");
+    assert.equal(uploaded.has("books.html"), true);
+    assert.ok(result.etag);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPushBrowserToCloud second push with matching expectedEtag uploads", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    const first = await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html"
+    });
+    const firstBody = Buffer.from(uploaded.get("books.html").body);
+    const second = await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html",
+      expectedEtag: first.etag.replaceAll("\"", "")
+    });
+
+    assert.equal(second.uploaded, true);
+    assert.equal(second.conflict, false);
+    assert.equal(second.remoteExists, true);
+    assert.ok(uploaded.get("books.html").body.equals(firstBody) || uploaded.has("books.html"));
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPushBrowserToCloud throws SYNC_CONFLICT when remote exists without expectedEtag", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html"
+    });
+    const before = Buffer.from(uploaded.get("books.html").body);
+    const beforeEtag = uploaded.get("books.html").etag;
+
+    await assert.rejects(
+      () => syncPushBrowserToCloud({
+        client,
+        browser: "chrome",
+        profile: "Default",
+        browserRoot,
+        folder: "Books",
+        remoteKey: "books.html"
+      }),
+      (error) => {
+        assert.equal(error.code, "SYNC_CONFLICT");
+        assert.equal(error.remoteKey, "books.html");
+        assert.match(error.message, /Use --force to overwrite/);
+        return true;
+      }
+    );
+
+    assert.equal(uploaded.get("books.html").etag, beforeEtag);
+    assert.ok(uploaded.get("books.html").body.equals(before));
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPushBrowserToCloud throws SYNC_CONFLICT when remote etag differs", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    const first = await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html"
+    });
+    const before = Buffer.from(uploaded.get("books.html").body);
+    uploaded.get("books.html").body = Buffer.from("changed-by-another-writer");
+    uploaded.get("books.html").etag = "\"other-writer\"";
+
+    await assert.rejects(
+      () => syncPushBrowserToCloud({
+        client,
+        browser: "chrome",
+        profile: "Default",
+        browserRoot,
+        folder: "Books",
+        remoteKey: "books.html",
+        expectedEtag: first.etag
+      }),
+      (error) => {
+        assert.equal(error.code, "SYNC_CONFLICT");
+        assert.equal(error.remoteEtag, "\"other-writer\"");
+        assert.equal(error.expectedEtag, first.etag);
+        return true;
+      }
+    );
+
+    assert.equal(uploaded.get("books.html").body.toString("utf8"), "changed-by-another-writer");
+    assert.ok(before.length > 0);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPushBrowserToCloud force overwrites even on etag mismatch", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    const first = await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html"
+    });
+    uploaded.get("books.html").etag = "\"other-writer\"";
+
+    const forced = await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html",
+      expectedEtag: first.etag,
+      force: true
+    });
+
+    assert.equal(forced.uploaded, true);
+    assert.equal(forced.conflict, false);
+    assert.equal(forced.force, true);
+    assert.notEqual(uploaded.get("books.html").etag, "\"other-writer\"");
+    assert.match(uploaded.get("books.html").body.toString("utf8"), /Node Handbook/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPushBrowserToCloud dryRun conflict returns fields and leaves object unchanged", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html"
+    });
+    const before = Buffer.from(uploaded.get("books.html").body);
+    const beforeEtag = uploaded.get("books.html").etag;
+
+    const preview = await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html",
+      dryRun: true
+    });
+
+    assert.equal(preview.dryRun, true);
+    assert.equal(preview.conflict, true);
+    assert.equal(preview.uploaded, false);
+    assert.equal(preview.remoteExists, true);
+    assert.equal(preview.conflictReason, "missing-expected-etag");
+    assert.equal(uploaded.get("books.html").etag, beforeEtag);
+    assert.ok(uploaded.get("books.html").body.equals(before));
+  } finally {
+    await cleanup();
+  }
+});
+
+test("syncPushBrowserToCloud ignores expectedEtag when expectedRemoteKey differs", async () => {
+  const { browserRoot, cleanup } = await createTestChromeProfile();
+  const uploaded = new Map();
+  const client = createMemoryCosClient(uploaded);
+
+  try {
+    const first = await syncPushBrowserToCloud({
+      client,
+      browser: "chrome",
+      profile: "Default",
+      browserRoot,
+      folder: "Books",
+      remoteKey: "books.html"
+    });
+
+    await assert.rejects(
+      () => syncPushBrowserToCloud({
+        client,
+        browser: "chrome",
+        profile: "Default",
+        browserRoot,
+        folder: "Books",
+        remoteKey: "books.html",
+        expectedEtag: first.etag,
+        expectedRemoteKey: "other-key.html"
+      }),
+      (error) => error.code === "SYNC_CONFLICT"
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
 function createMemoryCosClient(objects) {
   return {
     async headObject(key) {
@@ -231,16 +562,20 @@ function createMemoryCosClient(objects) {
     },
 
     async putObject(key, body, options = {}) {
+      const payload = Buffer.from(body);
+      const etag = options.etag ?? `"etag-${createHash("sha1").update(payload).digest("hex")}"`;
+
       objects.set(key, {
-        body: Buffer.from(body),
+        body: payload,
         contentType: options.contentType,
-        etag: "\"memory-etag\""
+        etag,
+        lastModified: options.lastModified ?? "Thu, 04 Jun 2026 00:00:00 GMT"
       });
 
       return {
         statusCode: 200,
         headers: {
-          etag: "\"memory-etag\""
+          etag
         }
       };
     },

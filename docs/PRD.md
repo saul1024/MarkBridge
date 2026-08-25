@@ -24,8 +24,9 @@ MarkBridge 是一个 Node.js ≥22 的本地 CLI 工具（无 npm 运行时依�
 
 同步语义澄清：
 
-- COS / sync 同步的是**浏览器指定文件夹导出的 HTML 快照**，覆盖上传到 COS 对象 key。
-- **不是**同步完整 `library.json`，也**不做**本地库与远端库的冲突检测或自动合并。
+- COS / sync 同步的是**浏览器指定文件夹导出的 HTML 快照**，上传到 COS 对象 key。
+- `sync push` 已做 ETag 冲突检测：远端不存在则允许首次上传；本机上次记录的 ETag 与远端一致则允许覆盖；否则默认拒绝，需 `--force` 才能覆盖。
+- **不是**同步完整 `library.json`，也**不做**书签内容自动合并或版本历史。
 
 ## 3. 核心目标
 
@@ -50,7 +51,7 @@ MarkBridge 是一个 Node.js ≥22 的本地 CLI 工具（无 npm 运行时依�
 - 不直接支持 Safari / Firefox Profile 写入。
 - 不通过浏览器运行时 API 写书签。
 - 不做完整 `library.json` 的云端双向同步。
-- 不做本地与远端的冲突检测或自动合并。
+- 不做书签内容自动合并，也不做版本历史；`sync push` 的 ETag 覆盖门禁除外。
 - 不做后台自动双向同步。
 
 ## 5. 用户流程
@@ -107,11 +108,12 @@ markbridge sync setup --browser chrome --profile "Huu Quang" --folder "Books" --
 markbridge sync check
 ```
 
-日常从当前设备上传指定文件夹 HTML 到 COS（覆盖同 key）：
+日常从当前设备上传指定文件夹 HTML 到 COS（默认按 ETag 拒绝覆盖已变化的远端对象）：
 
 ```sh
 markbridge sync push --dry-run
 markbridge sync push
+markbridge sync push --force
 ```
 
 在另一台设备上同样 `sync setup` 后，先预览再正式导入浏览器：
@@ -144,9 +146,9 @@ markbridge sync verify
 - `restore` 会在恢复前创建 safety backup。
 - `cloud push` / `pull` / `list` / `delete` 能按 `.env` 中的 COS 配置完成对象操作。
 - `sync setup` 保存默认浏览器、Profile、文件夹、导入模式和 COS key，且不写入 COS 密钥。
-- `sync push` 从浏览器指定文件夹导出 HTML 并覆盖上传到 COS；`--dry-run` 不上传。
+- `sync push` 从浏览器指定文件夹导出 HTML 并上传到 COS；远端已变化且 ETag 不匹配时拒绝覆盖，可用 `--force` 强制覆盖；`--dry-run` 不上传，但仍计算冲突并以退出码 1 提示。
 - `sync pull` 必须显式选择 `--dry-run` 或 `--apply`；`--dry-run` 不写浏览器。
 - `sync pull --apply` 按默认配置把 COS 中的 HTML 导入目标 Profile，写入前创建备份。
 - `sync check` 能检查本地默认配置、COS 配置、浏览器目录和远端对象。
 - `sync verify` 在不写浏览器的前提下验证远端 HTML 可导入目标 Profile。
-- 同步对象是文件夹 HTML 快照，不是完整 `library.json`；同一 key 覆盖上传，当前无冲突检测。
+- 同步对象是文件夹 HTML 快照，不是完整 `library.json`；`sync push` 用 ETag 做覆盖门禁，默认拒绝覆盖已变化的远端对象，`--force` 可强制覆盖；无自动合并，无版本历史。

@@ -7,4 +7,4 @@ export { applyImportedLibrary, importLibraryIntoTarget, IMPORT_MODES, librarySta
 export { addBookmark, addFolder, createEmptyLibrary, createIdFactory, createRandomIdFactory, getChildren, isBookmark, isFolder } from "./model.js";
 export { normalizeUrl } from "./normalize.js";
 export { getDefaultLibraryPath, getDefaultSyncConfigPath, getMarkBridgeHome, loadLibrary, loadOrCreateLibrary, loadSyncConfig, saveLibrary, saveSyncConfig } from "./store.js";
-export { createDefaultRemoteKey, getSyncRemoteStatus, syncPullCloudToBrowser, syncPushBrowserToCloud } from "./sync.js";
+export { createDefaultRemoteKey, detectPushConflict, getSyncRemoteStatus, syncPullCloudToBrowser, syncPushBrowserToCloud } from "./sync.js";

@@ -17,7 +17,7 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 - 本地 HTML <-> 腾讯云 COS（`cloud push` / `pull` / `list` / `delete`）
 - 浏览器指定文件夹 HTML <-> COS（`sync setup` / `push` / `pull` / `status` / `check` / `verify`）
 
-说明：当前 COS / sync 同步的是文件夹 HTML 快照（覆盖上传），不是完整 `library.json`，也不含冲突检测。
+说明：当前 COS / sync 同步的是文件夹 HTML 快照，不是完整 `library.json`。`sync push` 已做 ETag 冲突检测（默认拒绝覆盖，`--force` 可强制覆盖），仍无自动合并和版本历史。
 
 ## Phase 1: 本地 CLI MVP
 
@@ -47,7 +47,7 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 
 ## Phase 2: COS 同步
 
-状态：基础能力已落地；冲突检测 / 本地库级同步 / 自动合并仍未做。
+状态：基础能力已落地；`sync push` 的 ETag 冲突检测已落地。完整 `library.json` 级同步 / 自动合并 / 版本历史仍未做。
 
 已完成：
 
@@ -56,22 +56,22 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 - `sync setup`：保存默认同步配置（不含 COS 密钥）。
 - `sync status` / `status --remote`。
 - `sync check` / `sync verify`。
-- `sync push`：浏览器指定文件夹 -> HTML -> COS（同 key 覆盖）。
+- `sync push`：浏览器指定文件夹 -> HTML -> COS；ETag 冲突检测默认拒绝覆盖，`--force` 可强制覆盖。
 - `sync pull --dry-run` / `--apply`：COS -> HTML -> 浏览器 Profile。
 - 高级显式传参：`sync push-browser` / `sync pull-browser`。
 
 尚未完成：
 
-- 冲突检测：本地和远端都有改动时拒绝自动覆盖。
 - 完整 `library.json` 级别的云端同步。
 - 自动双向合并。
+- 版本历史。
 - 后台自动同步。
 - 端到端加密（归 Phase 3）。
 
 当前语义提醒：
 
 - 同步对象是浏览器文件夹 HTML 快照，不是 MarkBridge 本地库整文件。
-- 同一默认 key 会直接覆盖上传，不保留历史版本。
+- `sync push` 在远端对象已变化且 ETag 不匹配时拒绝覆盖，可用 `--force` 强制覆盖；不保留历史版本。
 
 ## Phase 3: 安全增强
 
@@ -99,5 +99,5 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 
 1. 保持 CLI 使用路径简单，巩固 README 与验收用例。
 2. 稳定 Chrome / Edge Profile 读写与备份恢复。
-3. 巩固已落地的 COS / sync 工作流（文件夹 HTML 覆盖同步）。
-4. 再设计冲突检测与（可选）`library.json` 级同步，而不是从零开始做 COS。
+3. 巩固已落地的 COS / sync 工作流（文件夹 HTML + ETag 冲突检测）。
+4. 再设计（可选）`library.json` 级同步与内容合并，而不是从零开始做 COS。

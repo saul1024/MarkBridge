@@ -75,7 +75,7 @@ Chrome / Edge Profile
 - `export`：MarkBridge 本地库 -> HTML 文件。
 - `push-browser`：MarkBridge 本地库 -> Chrome / Edge Profile。
 - `sync setup`：保存默认浏览器、Profile、书签目录和 COS 对象 key。
-- `sync push`：按默认配置从 Chrome / Edge Profile 上传到腾讯云 COS。
+- `sync push`：按默认配置从 Chrome / Edge Profile 上传到腾讯云 COS；远端已变化时默认拒绝覆盖，可用 `--force` 强制覆盖。
 - `sync pull --dry-run`：按默认配置从腾讯云 COS 拉取并预览导入影响。
 - `sync pull --apply`：按默认配置从腾讯云 COS 正式导入 Chrome / Edge Profile。
 - `sync push-browser`：Chrome / Edge Profile -> 腾讯云 COS，高级命令，每次显式传参。
@@ -253,6 +253,12 @@ chrome://bookmarks
 markbridge sync push
 ```
 
+如果提示远端对象已变化，先 `sync pull --dry-run` 查看，确认要覆盖后再：
+
+```sh
+markbridge sync push --force
+```
+
 查看当前绑定的浏览器、Profile、目录和 COS key：
 
 ```sh
@@ -323,6 +329,15 @@ Next: markbridge sync push
 ```sh
 markbridge sync push
 ```
+
+远端对象已变化（ETag 冲突）：
+
+```text
+Remote object changed since last push.
+Use --force to overwrite.
+```
+
+含义是 COS 上的对象和本机上次记录的 ETag 不一致。先 `sync pull --dry-run` 查看远端；只有确认要覆盖时才执行 `markbridge sync push --force`。
 
 浏览器正在运行：
 
@@ -437,7 +452,7 @@ markbridge sync pull --apply --quit-browser --reopen
 这四条命令的含义：
 
 - `sync setup`：保存默认浏览器、Profile、书签目录、导入模式和 COS 对象 key。它只做本地预览校验，不上传 COS。
-- `sync push`：按保存的配置，从浏览器指定书签目录导出 HTML 并覆盖上传到 COS。
+- `sync push`：按保存的配置，从浏览器指定书签目录导出 HTML 并上传到 COS。远端对象已变化且本机记录的 ETag 不匹配时拒绝覆盖，可用 `--force` 强制覆盖。
 - `sync pull --dry-run`：按保存的配置，从 COS 下载 HTML 到内存并预览会新增、创建、跳过多少书签，不写浏览器。
 - `sync pull --apply`：按保存的配置，把 COS 中的书签正式导入浏览器。正式写浏览器时建议加 `--quit-browser --reopen`。
 
@@ -449,7 +464,7 @@ markbridge sync pull --apply --quit-browser --reopen
 ~/.markbridge/sync-config.json
 ```
 
-这个文件只保存浏览器、Profile、目录、导入模式和 COS 对象 key，不保存 COS 密钥。COS 密钥仍然来自 `.env` 或真实环境变量。
+这个文件只保存浏览器、Profile、目录、导入模式、COS 对象 key，以及上次成功同步的 `lastRemoteEtag` / `lastRemoteKey`，不保存 COS 密钥。`lastRemoteEtag` 不是密钥。COS 密钥仍然来自 `.env` 或真实环境变量。
 
 查看当前默认配置：
 
@@ -499,7 +514,8 @@ markbridge sync pull-browser --browser chrome --profile "Huu Quang" --folder "Bo
 - `sync status --remote`：在本地默认配置基础上，检查 COS 远端对象是否存在。
 - `sync check`：检查默认配置、COS 配置、浏览器目录和远端对象。
 - `sync verify`：执行安全端到端验证，不上传 COS，不写浏览器。
-- `sync push --dry-run`：只预览来源、命中文件夹和对象 key，不上传 COS。
+- `sync push --dry-run`：只预览来源、命中文件夹、对象 key 和是否冲突，不上传 COS；若预览到冲突则以退出码 1 结束。
+- `sync push --force`：忽略 ETag 冲突，强制覆盖远端对象。
 - `sync pull --dry-run`：只预览 COS 导入影响，不写浏览器。
 - `sync pull --apply`：正式写浏览器。
 - `--quit-browser` / `--reopen`：正式写浏览器时自动退出并重新打开。
@@ -867,8 +883,9 @@ markbridge sync status --remote
 
 预期：
 
-- `--dry-run` 不上传 COS。
-- 正式执行后 COS 中出现默认对象 key。
+- `--dry-run` 不上传 COS，但仍会检查远端是否冲突。
+- 正式执行后 COS 中出现默认对象 key，并记下 `lastRemoteEtag`。
+- 若远端已存在且本机没有匹配的 ETag，命令会拒绝覆盖，需要 `--force`。
 - `sync status --remote` 显示 `Remote status: exists`。
 - 上传的 HTML 只包含 `Books` 文件夹及其子树。
 
@@ -1065,7 +1082,7 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 - `sync check` 健康检查和失败下一步提示。
 - `sync status --remote` 远端对象状态查询。
 - `sync verify` 安全端到端验证，不写浏览器。
-- `sync push` 按默认配置上传浏览器文件夹到 COS。
+- `sync push` 按默认配置上传浏览器文件夹到 COS，并用 ETag 做覆盖门禁。
 - `sync pull` 强制要求 `--dry-run` 或 `--apply`。
 - `sync push-browser` / `sync pull-browser` 高级显式传参工作流。
 - sync 预览输出、运行中浏览器提示和恢复命令输出。
@@ -1075,6 +1092,6 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 - 不做图形界面。
 - 不做浏览器扩展。
 - 不做本地加密。
-- COS 当前支持手动上传、下载、列表、删除，以及默认配置后的 `sync push` / `sync pull` 工作流；不做自动双向同步或冲突解决。
+- COS 当前支持手动上传、下载、列表、删除，以及默认配置后的 `sync push` / `sync pull` 工作流。`sync push` 已做 ETag 冲突检测，默认拒绝覆盖，`--force` 可强制覆盖；不做自动双向合并，也不做 `library.json` 级同步或版本历史。
 - 不支持 Safari / Firefox Profile 直接投递。
 - 不通过 Chrome / Edge 运行时 API 写书签；当前是文件级写入，所以建议使用 `--quit-browser --reopen`。

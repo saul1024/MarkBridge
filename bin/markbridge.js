@@ -634,7 +634,7 @@ async function commandSyncVerify(flags) {
 
 async function commandSyncPush(flags) {
   if (flags.remote === true || flags.folder === true || flags.folderPath === true) {
-    throw new Error("Usage: markbridge sync push [--dry-run] [--remote <object-key>] [--folder name|path] [--folder-path path]");
+    throw new Error("Usage: markbridge sync push [--dry-run] [--force] [--remote <object-key>] [--folder name|path] [--folder-path path]");
   }
 
   const syncConfigPath = getDefaultSyncConfigPath(process.env);
@@ -642,18 +642,28 @@ async function commandSyncPush(flags) {
   const options = mergeSyncConfigWithFlags(syncConfig, flags);
   const env = await loadEnvironmentForCli(flags);
   const config = loadCosConfig(env);
-  const result = await syncPushBrowserToCloud({
-    config,
-    browser: options.browser,
-    profile: options.profile,
-    browserRoot: expandUserPath(options.browserRoot),
-    folder: options.folder,
-    folderPath: options.folderPath,
-    includeEmptyFolders: Boolean(options.includeEmptyFolders),
-    remoteKey: options.remoteKey,
-    dryRun: Boolean(flags.dryRun),
-    env: process.env
-  });
+  let result;
+
+  try {
+    result = await syncPushBrowserToCloud({
+      config,
+      browser: options.browser,
+      profile: options.profile,
+      browserRoot: expandUserPath(options.browserRoot),
+      folder: options.folder,
+      folderPath: options.folderPath,
+      includeEmptyFolders: Boolean(options.includeEmptyFolders),
+      remoteKey: options.remoteKey,
+      dryRun: Boolean(flags.dryRun),
+      force: Boolean(flags.force),
+      expectedEtag: syncConfig.lastRemoteEtag,
+      expectedRemoteKey: syncConfig.lastRemoteKey,
+      env: process.env
+    });
+  } catch (error) {
+    throwFriendlySyncConflict(error);
+    throw error;
+  }
 
   printJsonOrText(flags, {
     provider: "cos",
@@ -665,6 +675,19 @@ async function commandSyncPush(flags) {
     configPath: syncConfigPath,
     ...result
   }));
+
+  if (result.dryRun && result.conflict) {
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!result.dryRun && result.uploaded) {
+    await saveSyncConfig({
+      ...syncConfig,
+      lastRemoteEtag: result.etag,
+      lastRemoteKey: result.remoteKey
+    }, syncConfigPath);
+  }
 }
 
 async function commandSyncPull(flags) {
@@ -708,6 +731,15 @@ async function commandSyncPull(flags) {
     throw error;
   }
 
+  if (!result.dryRun) {
+    await persistPulledRemoteEtag({
+      config,
+      syncConfig,
+      syncConfigPath,
+      remoteKey: result.remoteKey
+    });
+  }
+
   printJsonOrText(flags, {
     provider: "cos",
     bucket: config.bucket,
@@ -727,7 +759,7 @@ async function commandSyncPull(flags) {
 }
 
 async function commandSyncPushBrowser(flags) {
-  const usage = "Usage: markbridge sync push-browser --browser chrome --profile <profile> [--remote <object-key>] [--folder name|path] [--folder-path path] [--dry-run]";
+  const usage = "Usage: markbridge sync push-browser --browser chrome --profile <profile> [--remote <object-key>] [--folder name|path] [--folder-path path] [--dry-run] [--force]";
 
   if (!flags.browser || !flags.profile) {
     throw new Error(usage);
@@ -739,18 +771,26 @@ async function commandSyncPushBrowser(flags) {
 
   const env = await loadEnvironmentForCli(flags);
   const config = loadCosConfig(env);
-  const result = await syncPushBrowserToCloud({
-    config,
-    browser: flags.browser,
-    profile: flags.profile,
-    browserRoot: expandUserPath(flags.browserRoot),
-    folder: flags.folder,
-    folderPath: flags.folderPath,
-    includeEmptyFolders: Boolean(flags.includeEmptyFolders),
-    remoteKey: flags.remote,
-    dryRun: Boolean(flags.dryRun),
-    env: process.env
-  });
+  let result;
+
+  try {
+    result = await syncPushBrowserToCloud({
+      config,
+      browser: flags.browser,
+      profile: flags.profile,
+      browserRoot: expandUserPath(flags.browserRoot),
+      folder: flags.folder,
+      folderPath: flags.folderPath,
+      includeEmptyFolders: Boolean(flags.includeEmptyFolders),
+      remoteKey: flags.remote,
+      dryRun: Boolean(flags.dryRun),
+      force: Boolean(flags.force),
+      env: process.env
+    });
+  } catch (error) {
+    throwFriendlySyncConflict(error);
+    throw error;
+  }
 
   printJsonOrText(flags, {
     provider: "cos",
@@ -760,6 +800,10 @@ async function commandSyncPushBrowser(flags) {
     bucket: config.bucket,
     ...result
   }));
+
+  if (result.dryRun && result.conflict) {
+    process.exitCode = 1;
+  }
 }
 
 async function commandSyncPullBrowser(flags) {
@@ -1285,6 +1329,41 @@ function throwFriendlyRemoteNotFound(error, remoteKey, nextCommand) {
   ].join("\n"));
 }
 
+function throwFriendlySyncConflict(error) {
+  if (error?.code !== "SYNC_CONFLICT") {
+    return;
+  }
+
+  throw new Error([
+    "Remote object changed since last push.",
+    `Remote: ${error.remoteKey}`,
+    `Last ETag: ${error.expectedEtag || "(none)"}`,
+    `Remote ETag: ${error.remoteEtag || "(none)"}`,
+    "Use --force to overwrite."
+  ].join("\n"));
+}
+
+async function persistPulledRemoteEtag({ config, syncConfig, syncConfigPath, remoteKey }) {
+  try {
+    const remote = await getSyncRemoteStatus({
+      config,
+      remoteKey
+    });
+
+    if (!remote.exists || !remote.etag) {
+      return;
+    }
+
+    await saveSyncConfig({
+      ...syncConfig,
+      lastRemoteEtag: remote.etag,
+      lastRemoteKey: remote.remoteKey || remoteKey
+    }, syncConfigPath);
+  } catch {
+    // Pull already succeeded; remembering the ETag is best-effort.
+  }
+}
+
 function expandUserPath(value) {
   if (!value) {
     return value;
@@ -1664,7 +1743,26 @@ function formatSyncVerifyResult(result) {
 }
 
 function formatSyncPushBrowserResult(result) {
-  return [
+  if (result.dryRun && result.conflict) {
+    return [
+      "Preview only: no COS object will be written.",
+      "Conflict: remote object changed since last push.",
+      `Source: ${result.browserName} / ${result.profileName} (${result.profile})`,
+      `Folder: ${result.folder?.path ?? "all bookmarks"}`,
+      `Bookmarks exported: ${result.exportedBookmarks}`,
+      `Bucket: ${result.bucket}`,
+      `Remote: ${result.remoteKey}`,
+      `Last ETag: ${result.expectedEtag || "(none)"}`,
+      `Remote ETag: ${result.remoteEtag || "(none)"}`,
+      "Action: would refuse to overwrite COS object",
+      "Next: markbridge sync push --force"
+    ].join("\n");
+  }
+
+  const action = result.dryRun
+    ? (result.remoteExists ? "Action: would overwrite COS object" : "Action: would upload new COS object")
+    : (result.remoteExists ? "Action: COS object overwritten" : "Action: COS object uploaded");
+  const lines = [
     result.dryRun ? "Preview only: no COS object will be written." : "Synced browser bookmarks to COS.",
     `Source: ${result.browserName} / ${result.profileName} (${result.profile})`,
     `Folder: ${result.folder?.path ?? "all bookmarks"}`,
@@ -1672,8 +1770,18 @@ function formatSyncPushBrowserResult(result) {
     `Bucket: ${result.bucket}`,
     `Remote: ${result.remoteKey}`,
     `Size: ${result.size} bytes`,
-    result.dryRun ? "Action: would overwrite COS object" : "Action: COS object overwritten"
-  ].join("\n");
+    action
+  ];
+
+  if (result.etag) {
+    lines.push(`ETag: ${result.etag}`);
+  }
+
+  if (result.force && result.remoteExists) {
+    lines.push("Force overwrite: yes");
+  }
+
+  return lines.join("\n");
 }
 
 function formatSyncPullBrowserDryRunResult(result) {
@@ -1792,10 +1900,10 @@ Usage:
   markbridge sync status --remote
   markbridge sync check
   markbridge sync verify
-  markbridge sync push [--dry-run]
+  markbridge sync push [--dry-run] [--force]
   markbridge sync pull --dry-run
   markbridge sync pull --apply [--quit-browser] [--reopen]
-  markbridge sync push-browser --browser chrome|edge --profile <profile> [--remote <object-key>] [--folder name|path] [--folder-path path] [--dry-run]
+  markbridge sync push-browser --browser chrome|edge --profile <profile> [--remote <object-key>] [--folder name|path] [--folder-path path] [--dry-run] [--force]
   markbridge sync pull-browser [--remote <object-key>] --browser chrome|edge --profile <profile> [--folder MarkBridge] [--mode merge|replace-folder|append] [--dry-run] [--quit-browser] [--reopen]
   markbridge import <bookmarks.html> [--mode merge|append|replace] [--dry-run] [--library path]
   markbridge list [--json]
@@ -1815,6 +1923,8 @@ Storage:
   Default library: ~/.markbridge/library.json
   Default sync config: ~/.markbridge/sync-config.json
   Override with MARKBRIDGE_HOME or --library.
+
+sync push detects COS ETag conflicts and refuses to overwrite unless the last ETag matches or you pass --force.
 
 Current phase stores local data in plaintext.`);
 }

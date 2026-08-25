@@ -32,6 +32,18 @@ export async function syncPushBrowserToCloud(options = {}) {
   const exportedBookmarks = countExportedBookmarks(pulled.library, scopedExportOptions);
   const html = exportBookmarksHtml(pulled.library, scopedExportOptions);
   const body = Buffer.from(html, "utf8");
+  const remote = await getSyncRemoteStatus({
+    client,
+    config: options.config,
+    remoteKey
+  });
+  const expectedEtag = resolveExpectedEtag(options, remoteKey);
+  const force = Boolean(options.force);
+  const conflictInfo = detectPushConflict({
+    remote,
+    expectedEtag,
+    force
+  });
   const result = {
     dryRun: Boolean(options.dryRun),
     remoteKey,
@@ -44,11 +56,25 @@ export async function syncPushBrowserToCloud(options = {}) {
     folder: folderScope,
     exportedBookmarks,
     pulled: pulled.importBatch.stats,
-    uploaded: false
+    uploaded: false,
+    remoteExists: conflictInfo.remoteExists,
+    remoteEtag: conflictInfo.remoteEtag,
+    expectedEtag: conflictInfo.expectedEtag,
+    conflict: conflictInfo.conflict,
+    conflictReason: conflictInfo.conflictReason,
+    force
   };
 
   if (options.dryRun) {
     return result;
+  }
+
+  if (conflictInfo.conflict) {
+    throw createSyncConflictError({
+      remoteKey,
+      expectedEtag: conflictInfo.expectedEtag,
+      remoteEtag: conflictInfo.remoteEtag
+    });
   }
 
   const uploaded = await client.putObject(remoteKey, body, {
@@ -160,6 +186,79 @@ export async function getSyncRemoteStatus(options = {}) {
       exists: false
     };
   }
+}
+
+export function detectPushConflict(options = {}) {
+  const force = Boolean(options.force);
+  const remoteExists = Boolean(options.remote?.exists);
+  const remoteEtag = remoteExists ? (options.remote.etag ?? null) : null;
+  const expectedEtag = hasEtagValue(options.expectedEtag) ? options.expectedEtag : null;
+  const normalizedExpected = normalizeEtag(expectedEtag);
+  const normalizedRemote = normalizeEtag(remoteEtag);
+
+  if (!remoteExists || force || (normalizedExpected && normalizedExpected === normalizedRemote)) {
+    return {
+      remoteExists,
+      remoteEtag,
+      expectedEtag,
+      conflict: false,
+      conflictReason: null,
+      force
+    };
+  }
+
+  return {
+    remoteExists,
+    remoteEtag,
+    expectedEtag,
+    conflict: true,
+    conflictReason: normalizedExpected ? "etag-mismatch" : "missing-expected-etag",
+    force
+  };
+}
+
+export function normalizeEtag(value) {
+  if (!hasEtagValue(value)) {
+    return "";
+  }
+
+  let etag = String(value).trim();
+
+  if (etag.length >= 2 && etag.startsWith('"') && etag.endsWith('"')) {
+    etag = etag.slice(1, -1);
+  }
+
+  return etag;
+}
+
+function resolveExpectedEtag(options, remoteKey) {
+  const expectedRemoteKey = normalizeRemoteKey(options.expectedRemoteKey);
+
+  if (expectedRemoteKey && expectedRemoteKey !== remoteKey) {
+    return undefined;
+  }
+
+  return options.expectedEtag;
+}
+
+function hasEtagValue(value) {
+  return value !== undefined && value !== null && value !== false && value !== true && String(value).trim() !== "";
+}
+
+function createSyncConflictError(options) {
+  const expectedEtag = options.expectedEtag || "(none)";
+  const remoteEtag = options.remoteEtag || "(none)";
+  const error = new Error(
+    `Remote object changed since last push. Remote: ${options.remoteKey} Last ETag: ${expectedEtag} Remote ETag: ${remoteEtag} Use --force to overwrite.`
+  );
+
+  error.name = "SyncConflictError";
+  error.code = "SYNC_CONFLICT";
+  error.remoteKey = options.remoteKey;
+  error.remoteEtag = options.remoteEtag ?? null;
+  error.expectedEtag = options.expectedEtag ?? null;
+
+  return error;
 }
 
 function normalizeRemoteKey(value) {
