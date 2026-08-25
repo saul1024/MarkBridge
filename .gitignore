@@ -2,3 +2,16 @@ node_modules/
 coverage/
 .DS_Store
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+credentials.json
+credentials.*
+.markbridge/
+library.json
+sync-config.json
