@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 
-import { countExportedBookmarks, deleteCosFile, exportBookmarksHtml, getSyncRemoteStatus, importBookmarksHtml, isCosNotFoundError, listBrowserBackups, listBrowserProfiles, listCosFiles, loadCosConfig, loadEnvironment, previewLibraryToBrowser, pullBrowserBookmarks, pullCosFile, pushLibraryToBrowser, pushCosFile, resolveBrowserProfileFolder, resolveExportFolderInteractively, restoreBrowserBackup, syncPullCloudToBrowser, syncPushBrowserToCloud } from "../src/index.js";
+import { countExportedBookmarks, deleteCosFile, exportBookmarksHtml, getSyncRemoteStatus, importBookmarksHtml, isCosNotFoundError, listBrowserBackups, listBrowserProfiles, listCosFiles, loadCosConfig, loadEnvironment, previewLibraryToBrowser, pullBrowserBookmarks, pullCosFile, pushLibraryToBrowser, pushCosFile, resolveBrowserProfileFolder, resolveExportFolderInteractively, restoreBrowserBackup, startWebServer, getWebListenUrl, printWebListenMessage, resolveWebListenHost, resolveWebListenPort, syncPullCloudToBrowser, syncPushBrowserToCloud } from "../src/index.js";
 import {
   applyImportedLibrary,
   libraryStats,
@@ -66,6 +66,11 @@ async function main(argv) {
 
   if (command === "sync") {
     await commandSync(positionals.slice(1), flags);
+    return;
+  }
+
+  if (command === "web") {
+    await commandWeb(flags);
     return;
   }
 
@@ -480,6 +485,32 @@ async function commandCloudDelete(args, flags) {
     `Bucket: ${config.bucket}`,
     `Remote: ${result.remoteKey}`
   ].join("\n"));
+}
+
+async function commandWeb(flags) {
+  if (flags.port === true || flags.host === true) {
+    throw new Error("Usage: markbridge web [--port 8787] [--host 127.0.0.1]");
+  }
+
+  const host = resolveWebListenHost(flags.host);
+  const port = resolveWebListenPort(flags.port);
+  const server = await startWebServer({
+    host,
+    port,
+    env: process.env,
+    cwd: process.cwd()
+  });
+
+  printWebListenMessage(getWebListenUrl(server));
+
+  await new Promise((resolve) => {
+    const shutdown = () => {
+      server.close(() => resolve());
+    };
+
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
 }
 
 async function commandSync(args, flags) {
@@ -1982,6 +2013,7 @@ function printHelp() {
   console.log(`MarkBridge
 
 Usage:
+  markbridge web [--port 8787] [--host 127.0.0.1]
   markbridge export-browser [--browser chrome|edge] [--profile <profile>] --output <output.html> [--folder name|path] [--folder-path path] [--dry-run] [--no-interactive]
   markbridge import-browser --input <bookmarks.html> --browser chrome|edge --profile <profile> [--folder MarkBridge] [--mode merge|replace-folder|append] [--quit-browser] [--reopen] [--dry-run]
   markbridge cloud push --file <local-file> --remote <object-key>
@@ -2016,6 +2048,8 @@ Storage:
   Default library: ~/.markbridge/library.json
   Default sync config: ~/.markbridge/sync-config.json
   Override with MARKBRIDGE_HOME or --library.
+
+markbridge web starts a localhost-only page (127.0.0.1) to pick a Profile and folder without CLI flags. It is not a cloud app, Electron app, or browser extension.
 
 On a TTY, sync setup / export-browser / sync push-browser can prompt for missing browser, profile, and folder. --json, --no-interactive, pipes, and MARKBRIDGE_NO_INTERACTIVE=1 never prompt.
 

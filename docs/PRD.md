@@ -20,7 +20,7 @@ MarkBridge 是一个 Node.js ≥22 的本地 CLI 工具（无 npm 运行时依�
 - 腾讯云 COS 的 `cloud push` / `pull` / `list` / `delete`。
 - 基于默认配置的 `sync setup` / `status` / `check` / `verify` / `push` / `pull`。
 
-当前 MVP 不做书签类型分级，不做本地加密，不做图形界面，不做浏览器扩展。
+当前 MVP 不做书签类型分级，不做本地加密，不做浏览器扩展。本机 localhost 网页原型（`markbridge web`）已起步，不是云应用，也不是 Electron。
 
 同步语义澄清：
 
@@ -46,7 +46,7 @@ MarkBridge 是一个 Node.js ≥22 的本地 CLI 工具（无 npm 运行时依�
 ## 4. 非目标
 
 - 不做浏览器扩展。
-- 不做 GUI。
+- 不做云端 GUI / Electron / 浏览器扩展（本机 127.0.0.1 网页原型除外）。
 - 不做本地加密。
 - 不做端到端加密的 COS 对象。
 - 不做书签类型分级。
