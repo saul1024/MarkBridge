@@ -124,7 +124,9 @@ function cleanSyncConfig(config) {
     "folderPath",
     "includeEmptyFolders",
     "mode",
-    "remoteKey"
+    "remoteKey",
+    "lastRemoteEtag",
+    "lastRemoteKey"
   ];
 
   for (const key of keys) {
