@@ -20,10 +20,15 @@
     <p class="health" id="healthLine">正在检查本机服务…</p>
   </header>
 
-  <main>
-    <section class="card" id="copy">
-      <h2>跨 Profile 复制</h2>
+  <nav class="task-nav" aria-label="任务">
+    <button type="button" class="task-tab active" data-task="copy" aria-current="page">复制</button>
+    <button type="button" class="task-tab" data-task="export">导出</button>
+    <button type="button" class="task-tab" data-task="import">导入</button>
+    <button type="button" class="task-tab" data-task="sync">云同步</button>
+  </nav>
 
+  <main>
+    <section class="card" id="taskCopy">
       <div class="grid">
         <fieldset>
           <legend>从</legend>
@@ -37,7 +42,6 @@
             <select id="fromFolder"></select>
           </label>
         </fieldset>
-
         <fieldset>
           <legend>到</legend>
           <label>浏览器
@@ -58,112 +62,109 @@
           </label>
         </fieldset>
       </div>
-
       <label class="check">
         <input id="copyQuit" type="checkbox">
-        执行时退出目标浏览器
+        执行时退出浏览器
       </label>
-
       <div class="actions">
         <button type="button" class="primary" id="copyPreviewBtn">预览</button>
         <button type="button" class="danger" id="copyApplyBtn" disabled>执行</button>
       </div>
     </section>
 
-    <section class="card" id="htmlio">
-      <h2>HTML</h2>
-
-      <div class="grid">
-        <fieldset>
-          <legend>导出</legend>
-          <label>浏览器
-            <select id="exportBrowser"></select>
-          </label>
-          <label>Profile
-            <select id="exportProfile"></select>
-          </label>
-          <label>文件夹
-            <select id="exportFolder"></select>
-          </label>
-          <div class="actions">
-            <button type="button" class="primary" id="exportPreviewBtn">预览</button>
-            <button type="button" class="secondary" id="exportHtmlBtn">导出 HTML</button>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>导入</legend>
-          <label>HTML 文件
-            <input id="importFile" type="file" accept=".html,text/html">
-          </label>
-          <label>浏览器
-            <select id="importBrowser"></select>
-          </label>
-          <label>Profile
-            <select id="importProfile"></select>
-          </label>
-          <label>写入文件夹名
-            <input id="importFolder" type="text" value="MarkBridge" autocomplete="off" spellcheck="false">
-          </label>
-          <label>模式
-            <select id="importMode">
-              <option value="merge">合并去重</option>
-              <option value="replace-folder">替换该文件夹</option>
-              <option value="append">追加</option>
-            </select>
-          </label>
-          <label class="check">
-            <input id="importQuit" type="checkbox">
-            执行时退出目标浏览器
-          </label>
-          <div class="actions">
-            <button type="button" class="primary" id="importPreviewBtn">预览</button>
-            <button type="button" class="danger" id="importApplyBtn" disabled>执行</button>
-          </div>
-        </fieldset>
+    <section class="card hidden" id="taskExport">
+      <label>浏览器
+        <select id="exportBrowser"></select>
+      </label>
+      <label>Profile
+        <select id="exportProfile"></select>
+      </label>
+      <label>文件夹
+        <select id="exportFolder"></select>
+      </label>
+      <div class="actions">
+        <button type="button" class="primary" id="exportPreviewBtn">预览</button>
+        <button type="button" class="danger" id="exportApplyBtn" disabled>执行</button>
       </div>
     </section>
 
-    <section class="card" id="sync">
-      <h2>COS 同步</h2>
-
-      <dl class="status-dl" id="syncStatusDl">
-        <div><dt>Setup</dt><dd id="syncSetupState">读取中…</dd></div>
-        <div><dt>COS</dt><dd id="syncCosState">读取中…</dd></div>
-        <div><dt>远端</dt><dd id="syncRemoteState">—</dd></div>
-      </dl>
-
+    <section class="card hidden" id="taskImport">
+      <label>HTML 文件
+        <input id="importFile" type="file" accept=".html,text/html">
+      </label>
+      <label>浏览器
+        <select id="importBrowser"></select>
+      </label>
+      <label>Profile
+        <select id="importProfile"></select>
+      </label>
+      <label>写入文件夹名
+        <input id="importFolder" type="text" value="MarkBridge" autocomplete="off" spellcheck="false">
+      </label>
+      <label>模式
+        <select id="importMode">
+          <option value="merge">合并去重</option>
+          <option value="replace-folder">替换该文件夹</option>
+          <option value="append">追加</option>
+        </select>
+      </label>
+      <label class="check">
+        <input id="importQuit" type="checkbox">
+        执行时退出浏览器
+      </label>
       <div class="actions">
-        <button type="button" class="secondary" id="syncRefreshBtn">刷新状态</button>
-        <button type="button" class="secondary" id="syncSetupBtn">保存为默认同步</button>
+        <button type="button" class="primary" id="importPreviewBtn">预览</button>
+        <button type="button" class="danger" id="importApplyBtn" disabled>执行</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="taskSync">
+      <div class="dir-toggle" role="tablist" aria-label="云同步方向">
+        <button type="button" class="dir-tab active" data-sync-dir="push">上传</button>
+        <button type="button" class="dir-tab" data-sync-dir="pull">下载</button>
       </div>
 
-      <div class="split">
-        <div>
-          <h3>Push 到 COS</h3>
-          <label class="check hidden" id="forceWrap">
-            <input id="syncForce" type="checkbox">
-            强制覆盖远端（force）
-          </label>
-          <div class="actions">
-            <button type="button" class="primary" id="pushPreviewBtn">预览</button>
-            <button type="button" class="danger" id="pushApplyBtn" disabled>执行</button>
-          </div>
+      <div id="syncPush">
+        <label>浏览器
+          <select id="pushBrowser"></select>
+        </label>
+        <label>Profile
+          <select id="pushProfile"></select>
+        </label>
+        <label>文件夹
+          <select id="pushFolder"></select>
+        </label>
+        <p class="cos-line" id="pushCosLine">读取中…</p>
+        <label class="check hidden" id="forceWrap">
+          <input id="syncForce" type="checkbox">
+          强制覆盖远端
+        </label>
+        <div class="actions">
+          <button type="button" class="primary" id="pushPreviewBtn">预览</button>
+          <button type="button" class="danger" id="pushApplyBtn" disabled>执行</button>
         </div>
-        <div>
-          <h3>Pull 到浏览器</h3>
-          <label class="check">
-            <input id="pullQuit" type="checkbox">
-            执行时退出目标浏览器
-          </label>
-          <label class="check">
-            <input id="pullReopen" type="checkbox">
-            写完后重新打开书签页
-          </label>
-          <div class="actions">
-            <button type="button" class="primary" id="pullPreviewBtn">预览</button>
-            <button type="button" class="danger" id="pullApplyBtn" disabled>执行</button>
-          </div>
+      </div>
+
+      <div id="syncPull" class="hidden">
+        <p class="cos-line" id="pullCosLine">读取中…</p>
+        <p class="cos-line" id="pullTargetLine">目标：—</p>
+        <label>写入文件夹名
+          <input id="pullFolder" type="text" value="MarkBridge" autocomplete="off" spellcheck="false">
+        </label>
+        <label>模式
+          <select id="pullMode">
+            <option value="merge">合并去重</option>
+            <option value="replace-folder">替换该文件夹</option>
+            <option value="append">追加</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="pullQuit" type="checkbox">
+          执行时退出浏览器
+        </label>
+        <div class="actions">
+          <button type="button" class="primary" id="pullPreviewBtn">预览</button>
+          <button type="button" class="danger" id="pullApplyBtn" disabled>执行</button>
         </div>
       </div>
     </section>

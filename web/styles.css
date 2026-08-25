@@ -39,7 +39,7 @@ code {
   border-radius: 4px;
 }
 
-.topbar, main, footer {
+.topbar, main, footer, .task-nav {
   width: min(920px, calc(100% - 32px));
   margin-left: auto;
   margin-right: auto;
@@ -287,8 +287,8 @@ dd {
 
 .status-box {
   margin: 10px 0 0;
-  min-height: 140px;
-  max-height: 360px;
+  min-height: 88px;
+  max-height: 280px;
   overflow: auto;
   background: #1c1916;
   color: #f5f0e6;
@@ -304,6 +304,46 @@ dd {
 .status-box.ok { box-shadow: inset 3px 0 0 #22c55e; }
 
 .hidden { display: none; }
+
+.task-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+
+button.task-tab,
+button.dir-tab {
+  background: transparent;
+  color: var(--muted);
+}
+
+button.task-tab.active,
+button.dir-tab.active {
+  background: var(--teal);
+  color: #fff;
+}
+
+.dir-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.cos-line {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--ink);
+  word-break: break-all;
+}
+
+.actions .check { margin-top: 0; }
 
 footer {
   color: var(--muted);

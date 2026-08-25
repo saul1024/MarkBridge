@@ -39,9 +39,11 @@ test("web server binds 127.0.0.1 and reports health", async () => {
       const html = await page.text();
       assert.equal(page.status, 200);
       assert.match(html, /127\.0\.0\.1/);
-      assert.match(html, /跨 Profile 复制/);
-      assert.match(html, /COS 同步/);
-      assert.match(html, /导出 HTML/);
+      assert.match(html, /MarkBridge/);
+      assert.match(html, /复制/);
+      assert.match(html, /导出/);
+      assert.match(html, /导入/);
+      assert.match(html, /云同步/);
       assert.doesNotMatch(html, /lorem ipsum/i);
     } finally {
       await closeServer(server);
