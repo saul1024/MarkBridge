@@ -1,7 +1,7 @@
 import { countExportedBookmarks, exportBookmarksHtml, resolveExportFolder } from "./exporter.js";
 import { importBookmarksHtml } from "./importer.js";
 import { previewLibraryToBrowser, pullBrowserBookmarks, pushLibraryToBrowser } from "./browser.js";
-import { createCosClient, headCosFile, isCosNotFoundError } from "./cos.js";
+import { CosError, createCosClient, headCosFile, isCosNotFoundError } from "./cos.js";
 
 const HTML_CONTENT_TYPE = "text/html; charset=utf-8";
 
@@ -97,6 +97,43 @@ export async function syncPullCloudToBrowser(options = {}) {
     profile: options.profile,
     folder: options.remoteFolder ?? options.sourceFolder ?? options.folder
   });
+  const remote = await getSyncRemoteStatus({
+    client,
+    config: options.config,
+    remoteKey
+  });
+
+  if (!remote.exists) {
+    throw new CosError({
+      method: "GET",
+      key: remoteKey,
+      statusCode: 404,
+      message: "The specified key does not exist."
+    });
+  }
+
+  const expectedEtag = resolveExpectedEtag(options, remoteKey);
+  const change = detectPullRemoteChange({
+    remote,
+    expectedEtag
+  });
+  const remoteFields = {
+    remoteExists: change.remoteExists,
+    remoteEtag: change.remoteEtag,
+    expectedEtag: change.expectedEtag,
+    remoteChanged: change.remoteChanged,
+    remoteUnchanged: change.remoteUnchanged,
+    remoteStatus: change.remoteStatus
+  };
+
+  if (remote.size !== undefined) {
+    remoteFields.remoteSize = remote.size;
+  }
+
+  if (remote.lastModified) {
+    remoteFields.lastModified = remote.lastModified;
+  }
+
   const body = await client.getObject(remoteKey);
   const html = body.toString("utf8");
   const imported = importBookmarksHtml(html, {
@@ -123,7 +160,8 @@ export async function syncPullCloudToBrowser(options = {}) {
       imported: imported.importBatch.stats,
       ...preview,
       folder: targetFolder,
-      uploaded: false
+      uploaded: false,
+      ...remoteFields
     };
   }
 
@@ -145,7 +183,8 @@ export async function syncPullCloudToBrowser(options = {}) {
     remoteKey,
     size: body.length,
     imported: imported.importBatch.stats,
-    ...pushed
+    ...pushed,
+    ...remoteFields
   };
 }
 
@@ -190,17 +229,13 @@ export async function getSyncRemoteStatus(options = {}) {
 
 export function detectPushConflict(options = {}) {
   const force = Boolean(options.force);
-  const remoteExists = Boolean(options.remote?.exists);
-  const remoteEtag = remoteExists ? (options.remote.etag ?? null) : null;
-  const expectedEtag = hasEtagValue(options.expectedEtag) ? options.expectedEtag : null;
-  const normalizedExpected = normalizeEtag(expectedEtag);
-  const normalizedRemote = normalizeEtag(remoteEtag);
+  const inspected = inspectRemoteEtag(options);
 
-  if (!remoteExists || force || (normalizedExpected && normalizedExpected === normalizedRemote)) {
+  if (!inspected.remoteExists || force || inspected.etagsMatch) {
     return {
-      remoteExists,
-      remoteEtag,
-      expectedEtag,
+      remoteExists: inspected.remoteExists,
+      remoteEtag: inspected.remoteEtag,
+      expectedEtag: inspected.expectedEtag,
       conflict: false,
       conflictReason: null,
       force
@@ -208,12 +243,59 @@ export function detectPushConflict(options = {}) {
   }
 
   return {
-    remoteExists,
-    remoteEtag,
-    expectedEtag,
+    remoteExists: inspected.remoteExists,
+    remoteEtag: inspected.remoteEtag,
+    expectedEtag: inspected.expectedEtag,
     conflict: true,
-    conflictReason: normalizedExpected ? "etag-mismatch" : "missing-expected-etag",
+    conflictReason: inspected.normalizedExpected ? "etag-mismatch" : "missing-expected-etag",
     force
+  };
+}
+
+export function detectPullRemoteChange(options = {}) {
+  const inspected = inspectRemoteEtag(options);
+  const expectedEtag = inspected.normalizedExpected;
+
+  if (!inspected.remoteExists) {
+    return {
+      remoteExists: false,
+      remoteEtag: null,
+      expectedEtag,
+      remoteChanged: false,
+      remoteUnchanged: false,
+      remoteStatus: "missing"
+    };
+  }
+
+  if (!expectedEtag) {
+    return {
+      remoteExists: true,
+      remoteEtag: inspected.remoteEtag,
+      expectedEtag: null,
+      remoteChanged: true,
+      remoteUnchanged: false,
+      remoteStatus: "new-to-us"
+    };
+  }
+
+  if (inspected.etagsMatch) {
+    return {
+      remoteExists: true,
+      remoteEtag: inspected.remoteEtag,
+      expectedEtag,
+      remoteChanged: false,
+      remoteUnchanged: true,
+      remoteStatus: "unchanged"
+    };
+  }
+
+  return {
+    remoteExists: true,
+    remoteEtag: inspected.remoteEtag,
+    expectedEtag,
+    remoteChanged: true,
+    remoteUnchanged: false,
+    remoteStatus: "changed"
   };
 }
 
@@ -239,6 +321,23 @@ function resolveExpectedEtag(options, remoteKey) {
   }
 
   return options.expectedEtag;
+}
+
+function inspectRemoteEtag(options = {}) {
+  const remoteExists = Boolean(options.remote?.exists);
+  const remoteEtag = remoteExists ? (options.remote.etag ?? null) : null;
+  const expectedEtag = hasEtagValue(options.expectedEtag) ? options.expectedEtag : null;
+  const normalizedExpected = normalizeEtag(expectedEtag) || null;
+  const normalizedRemote = normalizeEtag(remoteEtag) || null;
+
+  return {
+    remoteExists,
+    remoteEtag,
+    expectedEtag,
+    normalizedExpected,
+    normalizedRemote,
+    etagsMatch: Boolean(normalizedExpected) && normalizedExpected === normalizedRemote
+  };
 }
 
 function hasEtagValue(value) {

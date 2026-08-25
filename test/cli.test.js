@@ -306,6 +306,61 @@ test("CLI short sync pull requires explicit preview or apply", async () => {
   }
 });
 
+test("CLI sync pull dry-run reports remote since last sync", async () => {
+  const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-pull-remote-"));
+  const mockCos = await startMockCosServer();
+  const env = createCosTestEnv(markbridgeHome, mockCos);
+  const { browserRoot, cleanup } = await createTestChromeProfile(markbridgeHome, createChromeBookmarksFileWithAllRoots());
+
+  try {
+    const setup = await runCli([
+      "sync",
+      "setup",
+      "--browser", "chrome",
+      "--profile", "Default",
+      "--browser-root", browserRoot,
+      "--folder", "Nested Other",
+      "--mode", "merge",
+      "--json"
+    ], env);
+
+    const html = [
+      "<!DOCTYPE NETSCAPE-Bookmark-file-1>",
+      '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+      "<TITLE>Bookmarks</TITLE>",
+      "<H1>Bookmarks</H1>",
+      "<DL><p>",
+      "    <DT><H3>Nested Other</H3>",
+      "    <DL><p>",
+      '        <DT><A HREF="https://other.example.com">Other Link</A>',
+      "    </DL><p>",
+      "</DL><p>"
+    ].join("\n");
+
+    mockCos.objects.set(setup.config.remoteKey, {
+      body: Buffer.from(html, "utf8"),
+      etag: "\"etag-remote\"",
+      lastModified: "Thu, 04 Jun 2026 00:00:00 GMT"
+    });
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      CLI_PATH,
+      "sync",
+      "pull",
+      "--dry-run"
+    ], { env });
+
+    assert.match(stdout, /Remote since last sync/);
+    assert.match(stdout, /first time seeing this object/);
+    assert.match(stdout, /Remote ETag: "etag-remote"/);
+    assert.match(stdout, /Last seen ETag: \(none\)/);
+    assert.match(stdout, /Preview only: no browser bookmarks will be changed/);
+  } finally {
+    await mockCos.close();
+    await cleanup();
+  }
+});
+
 test("CLI sync check explains missing defaults with the next command", async () => {
   const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-sync-check-missing-"));
   const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };

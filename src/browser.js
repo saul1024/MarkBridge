@@ -161,37 +161,49 @@ export async function pushLibraryToBrowser(library, options = {}) {
   }
 
   const backupPath = summary.changed ? createBackupPath(profile.bookmarksPath, options.now) : null;
+  let createdBackupPath = null;
 
-  if (summary.changed) {
-    await copyFile(profile.bookmarksPath, backupPath);
-    await writeJsonAtomic(profile.bookmarksPath, bookmarksFile);
+  try {
+    if (summary.changed) {
+      await copyFile(profile.bookmarksPath, backupPath);
+      createdBackupPath = backupPath;
+      await writeJsonAtomic(profile.bookmarksPath, bookmarksFile);
+    }
+
+    const result = {
+      browser,
+      browserName: config.name,
+      profile: profile.profile,
+      profileName: profile.name,
+      bookmarksPath: profile.bookmarksPath,
+      backupPath: createdBackupPath,
+      folder: folderTitle,
+      mode,
+      pushed: summary.addedBookmarks,
+      plannedBookmarks: stats.pushed,
+      summary,
+      root: targetRootKey,
+      verifyUrl: config.verifyUrl,
+      browserWasRunning,
+      quitBrowser: browserWasRunning && Boolean(options.quitBrowser),
+      reopened: false
+    };
+
+    if (options.reopen) {
+      await reopenBrowser(browser, options);
+      result.reopened = true;
+    }
+
+    return result;
+  } catch (error) {
+    if (createdBackupPath && error && typeof error === "object") {
+      error.backupPath = createdBackupPath;
+      error.browser = error.browser ?? browser;
+      error.profile = error.profile ?? profile.profile;
+    }
+
+    throw error;
   }
-
-  const result = {
-    browser,
-    browserName: config.name,
-    profile: profile.profile,
-    profileName: profile.name,
-    bookmarksPath: profile.bookmarksPath,
-    backupPath,
-    folder: folderTitle,
-    mode,
-    pushed: summary.addedBookmarks,
-    plannedBookmarks: stats.pushed,
-    summary,
-    root: targetRootKey,
-    verifyUrl: config.verifyUrl,
-    browserWasRunning,
-    quitBrowser: browserWasRunning && Boolean(options.quitBrowser),
-    reopened: false
-  };
-
-  if (options.reopen) {
-    await reopenBrowser(browser, options);
-    result.reopened = true;
-  }
-
-  return result;
 }
 
 export async function previewLibraryToBrowser(library, options = {}) {

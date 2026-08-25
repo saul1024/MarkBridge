@@ -76,8 +76,8 @@ Chrome / Edge Profile
 - `push-browser`：MarkBridge 本地库 -> Chrome / Edge Profile。
 - `sync setup`：保存默认浏览器、Profile、书签目录和 COS 对象 key。
 - `sync push`：按默认配置从 Chrome / Edge Profile 上传到腾讯云 COS；远端已变化时默认拒绝覆盖，可用 `--force` 强制覆盖。
-- `sync pull --dry-run`：按默认配置从腾讯云 COS 拉取并预览导入影响。
-- `sync pull --apply`：按默认配置从腾讯云 COS 正式导入 Chrome / Edge Profile。
+- `sync pull --dry-run`：按默认配置从腾讯云 COS 拉取并预览导入影响，同时提示远端相对上次同步是否变化。
+- `sync pull --apply`：按默认配置从腾讯云 COS 正式导入 Chrome / Edge Profile；始终打印 Backup，写入失败时给出 restore 命令。
 - `sync push-browser`：Chrome / Edge Profile -> 腾讯云 COS，高级命令，每次显式传参。
 - `sync pull-browser`：腾讯云 COS -> Chrome / Edge Profile，高级命令，每次显式传参。
 - `cloud push`：本地 HTML 文件 -> 腾讯云 COS。
@@ -307,7 +307,7 @@ markbridge sync pull --dry-run
 - `sync status --remote` 显示 `Remote status: exists`。
 - `sync verify` 输出 `Sync verify: passed`，并显示 `Browser changes: no`。
 - `sync push --dry-run` 显示 `Preview only: no COS object will be written.`。
-- `sync pull --dry-run` 显示预计新增和跳过重复数量，不会修改浏览器。
+- `sync pull --dry-run` 显示预计新增和跳过重复数量，以及 Remote since last sync，不会修改浏览器。
 
 只有当 `sync pull --dry-run` 的结果符合预期，才执行：
 
@@ -337,7 +337,17 @@ Remote object changed since last push.
 Use --force to overwrite.
 ```
 
-含义是 COS 上的对象和本机上次记录的 ETag 不一致。先 `sync pull --dry-run` 查看远端；只有确认要覆盖时才执行 `markbridge sync push --force`。
+含义是 COS 上的对象和本机上次记录的 ETag 不一致。先 `sync pull --dry-run` 查看远端（输出会标明 Remote since last sync）；只有确认要覆盖时才执行 `markbridge sync push --force`。`sync pull` 本身不会因为 ETag 未变化而拒绝导入。
+
+写入浏览器失败：
+
+```text
+Write failed.
+Backup: /path/to/Bookmarks.markbridge-backup-...
+Restore: markbridge browser restore --browser chrome --profile Default --backup /path/to/Bookmarks.markbridge-backup-... --quit-browser --reopen
+```
+
+含义是浏览器文件没写成，但备份还在。按 Restore 命令回滚，这次失败不会更新 `lastRemoteEtag`。
 
 浏览器正在运行：
 
@@ -453,8 +463,8 @@ markbridge sync pull --apply --quit-browser --reopen
 
 - `sync setup`：保存默认浏览器、Profile、书签目录、导入模式和 COS 对象 key。它只做本地预览校验，不上传 COS。
 - `sync push`：按保存的配置，从浏览器指定书签目录导出 HTML 并上传到 COS。远端对象已变化且本机记录的 ETag 不匹配时拒绝覆盖，可用 `--force` 强制覆盖。
-- `sync pull --dry-run`：按保存的配置，从 COS 下载 HTML 到内存并预览会新增、创建、跳过多少书签，不写浏览器。
-- `sync pull --apply`：按保存的配置，把 COS 中的书签正式导入浏览器。正式写浏览器时建议加 `--quit-browser --reopen`。
+- `sync pull --dry-run`：按保存的配置，从 COS 下载 HTML 到内存并预览会新增、创建、跳过多少书签，同时显示远端 ETag 相对上次同步是未变化、已变化还是首次见到；不写浏览器。远端未变化时 apply 仍会按 merge 写入。
+- `sync pull --apply`：按保存的配置，把 COS 中的书签正式导入浏览器。正式写浏览器时建议加 `--quit-browser --reopen`。成功或失败都会尽量给出 Backup / Restore；失败不会更新 `lastRemoteEtag`。
 
 `sync pull` 必须显式选择 `--dry-run` 或 `--apply`。这样可以避免误操作直接改浏览器书签。
 
@@ -917,7 +927,8 @@ markbridge sync pull --dry-run
 
 - 命令会按默认对象 key 从 COS 下载 HTML 到内存。
 - 输出目标 Profile、目标文件夹、预计新增书签和重复书签。
-- `--dry-run` 不写浏览器。
+- 输出 Remote ETag、Last seen ETag，以及 Remote since last sync。
+- `--dry-run` 不写浏览器。远端未变化时仍可随后 `--apply`。
 
 ### 6. 从 COS 正式导入 Chrome
 
@@ -927,7 +938,8 @@ markbridge sync pull --apply --quit-browser --reopen
 
 预期：
 
-- 正式执行会创建备份。
+- 正式执行会创建备份，并打印 Backup 与 Restore 命令。
+- 写入失败时会提示 Backup 路径和 restore 命令，且不更新 `lastRemoteEtag`。
 - Chrome 打开后，在 `chrome://bookmarks` 可以看到 `Bookmarks Bar / Books`。
 
 ### 7. 重复从 COS 导入不叠加
@@ -1084,6 +1096,7 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 - `sync verify` 安全端到端验证，不写浏览器。
 - `sync push` 按默认配置上传浏览器文件夹到 COS，并用 ETag 做覆盖门禁。
 - `sync pull` 强制要求 `--dry-run` 或 `--apply`。
+- `sync pull` 用 ETag 做远端变化提示（信息不阻断）；写入失败时给出 Backup / Restore。
 - `sync push-browser` / `sync pull-browser` 高级显式传参工作流。
 - sync 预览输出、运行中浏览器提示和恢复命令输出。
 
@@ -1092,6 +1105,6 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 - 不做图形界面。
 - 不做浏览器扩展。
 - 不做本地加密。
-- COS 当前支持手动上传、下载、列表、删除，以及默认配置后的 `sync push` / `sync pull` 工作流。`sync push` 已做 ETag 冲突检测，默认拒绝覆盖，`--force` 可强制覆盖；不做自动双向合并，也不做 `library.json` 级同步或版本历史。
+- COS 当前支持手动上传、下载、列表、删除，以及默认配置后的 `sync push` / `sync pull` 工作流。`sync push` 已做 ETag 冲突检测，默认拒绝覆盖，`--force` 可强制覆盖；`sync pull` 会提示远端是否变化但不阻断。不做自动双向合并，也不做 `library.json` 级同步或版本历史。
 - 不支持 Safari / Firefox Profile 直接投递。
 - 不通过 Chrome / Edge 运行时 API 写书签；当前是文件级写入，所以建议使用 `--quit-browser --reopen`。

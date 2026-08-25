@@ -17,7 +17,7 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 - 本地 HTML <-> 腾讯云 COS（`cloud push` / `pull` / `list` / `delete`）
 - 浏览器指定文件夹 HTML <-> COS（`sync setup` / `push` / `pull` / `status` / `check` / `verify`）
 
-说明：当前 COS / sync 同步的是文件夹 HTML 快照，不是完整 `library.json`。`sync push` 已做 ETag 冲突检测（默认拒绝覆盖，`--force` 可强制覆盖），仍无自动合并和版本历史。
+说明：当前 COS / sync 同步的是文件夹 HTML 快照，不是完整 `library.json`。`sync push` 已做 ETag 冲突检测（默认拒绝覆盖，`--force` 可强制覆盖）；`sync pull` 已做远端变化提示（信息不阻断），写入失败时给出备份和 restore 命令。仍无自动合并和版本历史。
 
 ## Phase 1: 本地 CLI MVP
 
@@ -47,7 +47,7 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 
 ## Phase 2: COS 同步
 
-状态：基础能力已落地；`sync push` 的 ETag 冲突检测已落地。完整 `library.json` 级同步 / 自动合并 / 版本历史仍未做。
+状态：基础能力已落地；`sync push` 的 ETag 冲突检测已落地；`sync pull` 的远端变化提示与写入失败备份提示已落地。完整 `library.json` 级同步 / 自动合并 / 版本历史仍未做。
 
 已完成：
 
@@ -57,7 +57,8 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 - `sync status` / `status --remote`。
 - `sync check` / `sync verify`。
 - `sync push`：浏览器指定文件夹 -> HTML -> COS；ETag 冲突检测默认拒绝覆盖，`--force` 可强制覆盖。
-- `sync pull --dry-run` / `--apply`：COS -> HTML -> 浏览器 Profile。
+- `sync pull --dry-run` / `--apply`：COS -> HTML -> 浏览器 Profile；对比上次记录的 ETag 提示远端是否变化，但不因此拒绝拉取。
+- `sync pull --apply` 写入失败时给出 Backup 路径和 restore 命令，不更新 `lastRemoteEtag`。
 - 高级显式传参：`sync push-browser` / `sync pull-browser`。
 
 尚未完成：
@@ -72,6 +73,7 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 
 - 同步对象是浏览器文件夹 HTML 快照，不是 MarkBridge 本地库整文件。
 - `sync push` 在远端对象已变化且 ETag 不匹配时拒绝覆盖，可用 `--force` 强制覆盖；不保留历史版本。
+- `sync pull` 只提示远端相对上次 ETag 的变化，不阻断；冲突拒绝仍只在 push 侧。
 
 ## Phase 3: 安全增强
 
@@ -99,5 +101,5 @@ MVP 先把迁移链路和跨设备文件夹同步做清楚，不做书签类型�
 
 1. 保持 CLI 使用路径简单，巩固 README 与验收用例。
 2. 稳定 Chrome / Edge Profile 读写与备份恢复。
-3. 巩固已落地的 COS / sync 工作流（文件夹 HTML + ETag 冲突检测）。
+3. 巩固已落地的 COS / sync 工作流（文件夹 HTML + push ETag 冲突检测 + pull 变化提示）。
 4. 再设计（可选）`library.json` 级同步与内容合并，而不是从零开始做 COS。
