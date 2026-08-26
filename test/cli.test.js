@@ -15,6 +15,13 @@ const FIXTURE_PATH = resolve("fixtures/private-filter.html");
 const DEMO_FIXTURE_PATH = resolve("fixtures/demo-bookmarks.html");
 const CHROME_FIXTURE_PATH = resolve("fixtures/chrome-bookmarks.html");
 
+test("CLI help includes markbridge web", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [CLI_PATH, "help"]);
+  assert.match(stdout, /markbridge web \[--port 8787\] \[--host 127\.0\.0\.1\]/);
+  assert.match(stdout, /localhost-only page/);
+});
+
+
 test("CLI imports, persists, searches, edits, deletes, and exports", async () => {
   const markbridgeHome = await mkdtemp(join(tmpdir(), "markbridge-cli-test-"));
   const env = { ...process.env, MARKBRIDGE_HOME: markbridgeHome };

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MarkBridge</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cpath d='M10 8h12v16l-6-3.5L10 24V8z' fill='%23fffdf8'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <p class="eyebrow">本机 · 127.0.0.1</p>
+        <h1>MarkBridge</h1>
+      </div>
+    </div>
+    <p class="health" id="healthLine">正在检查本机服务…</p>
+  </header>
+
+  <nav class="task-nav" aria-label="任务">
+    <button type="button" class="task-tab active" data-task="copy" aria-current="page">复制</button>
+    <button type="button" class="task-tab" data-task="export">导出</button>
+    <button type="button" class="task-tab" data-task="import">导入</button>
+    <button type="button" class="task-tab" data-task="sync">云同步</button>
+  </nav>
+
+  <main>
+    <section class="card" id="taskCopy">
+      <div class="grid">
+        <fieldset>
+          <legend>从</legend>
+          <label>浏览器
+            <select id="fromBrowser"></select>
+          </label>
+          <label>Profile
+            <select id="fromProfile"></select>
+          </label>
+          <label>文件夹
+            <select id="fromFolder"></select>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>到</legend>
+          <label>浏览器
+            <select id="toBrowser"></select>
+          </label>
+          <label>Profile
+            <select id="toProfile"></select>
+          </label>
+          <label>写入文件夹名
+            <input id="toFolder" type="text" value="MarkBridge" autocomplete="off" spellcheck="false">
+          </label>
+          <label>模式
+            <select id="copyMode">
+              <option value="merge">合并去重</option>
+              <option value="replace-folder">替换该文件夹</option>
+              <option value="append">追加</option>
+            </select>
+          </label>
+        </fieldset>
+      </div>
+      <label class="check">
+        <input id="copyQuit" type="checkbox">
+        执行时退出浏览器
+      </label>
+      <div class="actions">
+        <button type="button" class="primary" id="copyPreviewBtn">预览</button>
+        <button type="button" class="danger" id="copyApplyBtn" disabled>执行</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="taskExport">
+      <label>浏览器
+        <select id="exportBrowser"></select>
+      </label>
+      <label>Profile
+        <select id="exportProfile"></select>
+      </label>
+      <label>文件夹
+        <select id="exportFolder"></select>
+      </label>
+      <div class="actions">
+        <button type="button" class="primary" id="exportPreviewBtn">预览</button>
+        <button type="button" class="danger" id="exportApplyBtn" disabled>执行</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="taskImport">
+      <label>HTML 文件
+        <input id="importFile" type="file" accept=".html,text/html">
+      </label>
+      <label>浏览器
+        <select id="importBrowser"></select>
+      </label>
+      <label>Profile
+        <select id="importProfile"></select>
+      </label>
+      <label>写入文件夹名
+        <input id="importFolder" type="text" value="MarkBridge" autocomplete="off" spellcheck="false">
+      </label>
+      <label>模式
+        <select id="importMode">
+          <option value="merge">合并去重</option>
+          <option value="replace-folder">替换该文件夹</option>
+          <option value="append">追加</option>
+        </select>
+      </label>
+      <label class="check">
+        <input id="importQuit" type="checkbox">
+        执行时退出浏览器
+      </label>
+      <div class="actions">
+        <button type="button" class="primary" id="importPreviewBtn">预览</button>
+        <button type="button" class="danger" id="importApplyBtn" disabled>执行</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="taskSync">
+      <div class="dir-toggle" role="tablist" aria-label="云同步方向">
+        <button type="button" class="dir-tab active" data-sync-dir="push">上传</button>
+        <button type="button" class="dir-tab" data-sync-dir="pull">下载</button>
+      </div>
+
+      <div id="syncPush">
+        <label>浏览器
+          <select id="pushBrowser"></select>
+        </label>
+        <label>Profile
+          <select id="pushProfile"></select>
+        </label>
+        <label>文件夹
+          <select id="pushFolder"></select>
+        </label>
+        <p class="cos-line" id="pushCosLine">读取中…</p>
+        <label class="check hidden" id="forceWrap">
+          <input id="syncForce" type="checkbox">
+          强制覆盖远端
+        </label>
+        <div class="actions">
+          <button type="button" class="primary" id="pushPreviewBtn">预览</button>
+          <button type="button" class="danger" id="pushApplyBtn" disabled>执行</button>
+        </div>
+      </div>
+
+      <div id="syncPull" class="hidden">
+        <p class="cos-line" id="pullCosLine">读取中…</p>
+        <p class="cos-line" id="pullTargetLine">目标：—</p>
+        <label>写入文件夹名
+          <input id="pullFolder" type="text" value="MarkBridge" autocomplete="off" spellcheck="false">
+        </label>
+        <label>模式
+          <select id="pullMode">
+            <option value="merge">合并去重</option>
+            <option value="replace-folder">替换该文件夹</option>
+            <option value="append">追加</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="pullQuit" type="checkbox">
+          执行时退出浏览器
+        </label>
+        <div class="actions">
+          <button type="button" class="primary" id="pullPreviewBtn">预览</button>
+          <button type="button" class="danger" id="pullApplyBtn" disabled>执行</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card log-card" id="log">
+      <div class="log-head">
+        <h2>状态</h2>
+        <button type="button" class="ghost" id="clearLogBtn">清除</button>
+      </div>
+      <pre id="statusBox" class="status-box" role="status"></pre>
+    </section>
+  </main>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

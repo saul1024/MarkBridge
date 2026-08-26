@@ -9,3 +9,4 @@ export { normalizeUrl } from "./normalize.js";
 export { hasFlagValue, isInteractive, pickFromList, resolveBrowserProfileFolder, resolveExportFolderInteractively } from "./prompt.js";
 export { getDefaultLibraryPath, getDefaultSyncConfigPath, getMarkBridgeHome, loadLibrary, loadOrCreateLibrary, loadSyncConfig, saveLibrary, saveSyncConfig } from "./store.js";
 export { createDefaultRemoteKey, detectPullRemoteChange, detectPushConflict, getSyncRemoteStatus, syncPullCloudToBrowser, syncPushBrowserToCloud } from "./sync.js";
+export { createWebHandler, createWebServer, DEFAULT_WEB_HOST, DEFAULT_WEB_PORT, getWebListenUrl, isLocalRemoteAddress, printWebListenMessage, resolveWebListenHost, resolveWebListenPort, startWebServer } from "./web-server.js";

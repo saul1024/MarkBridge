@@ -2,7 +2,7 @@
 
 MarkBridge 是一个面向跨浏览器、跨 Profile 书签迁移的 CLI。它把浏览器书签和浏览器账号解耦：你可以先把书签拉入 MarkBridge 本地库，再按需要导出 HTML 或投递到指定 Chrome / Edge Profile。
 
-当前实现是 CLI MVP。它支持本地导入导出、Chrome / Edge Profile 投递，以及腾讯云 COS 上传、下载、列表。它不包含图形界面、浏览器扩展、本地加密、Safari / Firefox Profile 投递，也不通过浏览器运行时 API 写书签。
+当前实现以 CLI 为主，并带一个仅监听 127.0.0.1 的本机网页原型（`markbridge web`）。它支持本地导入导出、Chrome / Edge Profile 投递，以及腾讯云 COS 上传、下载、列表。它不是云应用，也不是 Electron 或浏览器扩展。当前不做本地加密、Safari / Firefox Profile 投递，也不通过浏览器运行时 API 写书签。
 
 ## 当前支持
 
@@ -21,6 +21,7 @@ MarkBridge 是一个面向跨浏览器、跨 Profile 书签迁移的 CLI。它�
 - 一条命令将浏览器指定书签目录同步上传到腾讯云 COS。
 - 一条命令从腾讯云 COS 拉取 HTML 并预览或导入指定浏览器 Profile。
 - 将导出的 HTML 上传到腾讯云 COS，并从 COS 下载到本地。
+- 在本机打开网页：`markbridge web`，用浏览器选择 Profile / 文件夹并预览、执行复制或同步，也可导出和导入 HTML。
 
 ## 数据流向
 
@@ -163,6 +164,38 @@ npm run acceptance
 ```
 
 `npm run acceptance` 会创建临时模拟 Chrome Profile，验证 `export-browser`、`import-browser --mode merge`、`import-browser --mode replace-folder` 和备份恢复端到端链路，不会读写你的真实浏览器 Profile。
+
+
+## 本机网页
+
+在**有 Chrome / Edge Profile 的那台电脑**上运行：
+
+```sh
+markbridge web
+```
+
+终端会打印监听地址（默认 `http://127.0.0.1:8787`）。用本机浏览器打开该地址。按 Ctrl+C 停止。
+
+也可以指定端口：
+
+```sh
+markbridge web --port 8787 --host 127.0.0.1
+```
+
+免安装时：
+
+```sh
+node bin/markbridge.js web
+```
+
+说明：
+
+- 这是本机网页，不是云应用。服务只绑定 `127.0.0.1`，外网和局域网都访问不到。
+- 需要在**运行网页的那台机器**上安装 Node.js 22+。换一台电脑就看不到这边的浏览器 Profile。
+- 书签文件始终留在运行 server 的这台电脑上。
+- COS 密钥来自当前工作目录的 `.env` 或环境变量，接口响应不会包含 `secretId` / `secretKey`。
+- 写浏览器的操作默认先预览；「执行」是单独按钮。写入前请退出 Chrome / Edge，或勾选退出浏览器。
+- 这不是 Electron，也不是浏览器扩展。
 
 ## 本地存储
 
@@ -1082,7 +1115,7 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js
 当前通过：
 
 ```text
-npm test: 75 tests passed
+npm test: 84 tests passed
 npm run acceptance: passed
 node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 ```
@@ -1113,11 +1146,12 @@ node --check src/*.js bin/markbridge.js test/*.js scripts/*.js: passed
 - `sync pull` 用 ETag 做远端变化提示（信息不阻断）；写入失败时给出 Backup / Restore。
 - `sync push-browser` / `sync pull-browser` 高级显式传参工作流。
 - sync 预览输出、运行中浏览器提示和恢复命令输出。
+- `markbridge web` 本机网页：127.0.0.1 绑定、Profile 列表、复制预览不写 Bookmarks、缺 COS 时 status 返回 configured:false。
 
 ## 当前限制
 
-- 不做图形界面，也不引入 TUI 库；TTY 下只有编号列表选择器。
-- 不做浏览器扩展。
+- 本机网页（`markbridge web`）是 localhost 原型：只绑定 127.0.0.1，必须在有 Chrome / Edge Profile 的那台机器上运行。不是 Electron，也不是浏览器扩展，也不是云应用。
+- 不做浏览器扩展，也不引入 TUI 库；TTY 下仍是编号列表选择器。
 - 不做本地加密。
 - COS 当前支持手动上传、下载、列表、删除，以及默认配置后的 `sync push` / `sync pull` 工作流。`sync push` 已做 ETag 冲突检测，默认拒绝覆盖，`--force` 可强制覆盖；`sync pull` 会提示远端是否变化但不阻断。不做自动双向合并，也不做 `library.json` 级同步或版本历史。
 - 不支持 Safari / Firefox Profile 直接投递。

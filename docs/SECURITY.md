@@ -30,6 +30,7 @@ MarkBridge 当前不是加密保险箱：
 
 - COS 密钥来自工作目录 `.env`（或真实环境变量）：`COS_SECRET_ID` / `COS_SECRET_KEY` 等。`.env` 应被 gitignore，不要提交真实密钥。
 - 默认同步配置文件 `~/.markbridge/sync-config.json` 只保存浏览器、Profile、目录、导入模式、COS 对象 key，以及上次成功同步的 `lastRemoteEtag` / `lastRemoteKey`，**不保存** COS 密钥。`lastRemoteEtag` 不是密钥。
+- `markbridge web` 只绑定 `127.0.0.1`。API 响应会去掉 `secretId` / `secretKey` / `COS_SECRET_*`，密钥仍只在本机 Node 进程里从 `.env` 或环境变量读取。
 - COS 对象内容是明文 Netscape Bookmark HTML；能访问该 Bucket / key 的人可以直接看到书签标题和 URL。
 - `sync push` 默认按 ETag 拒绝覆盖已变化的远端对象；传入 `--force` 仍会覆盖，误用 `--force` 可能覆盖远端快照。
 - 删除远端对象使用 `cloud delete`，操作不可从 MarkBridge 侧自动回滚。
